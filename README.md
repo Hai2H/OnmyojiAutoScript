@@ -1,6 +1,6 @@
 <div align="center">
 
-# OnmyojiAutoScript
+# OnmyojiAutoScript - Pyy 
 
 <br>
 
