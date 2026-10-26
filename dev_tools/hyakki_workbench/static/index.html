@@ -187,6 +187,14 @@
           <button data-filter="reviewed">已审核</button>
         </div>
       </div>
+      <div class="scan-shortcuts">
+        <span><kbd>1</kbd> 旧模型正确</span>
+        <span><kbd>2</kbd> 保存所选具体式神</span>
+        <span><kbd>3</kbd> 需要重标</span>
+        <span><kbd>4</kbd> UNKNOWN</span>
+        <span><kbd>0</kbd> 跳过</span>
+        <span><kbd>←</kbd><kbd>→</kbd> 浏览</span>
+      </div>
       <div class="review-layout">
         <aside class="panel review-queue">
           <div class="panel-title">
@@ -221,10 +229,10 @@
           <div>
             <h3>人工结论</h3>
             <p class="muted small">旧模型正确时直接确认；不正确时选择真实类别。</p>
-            <button id="review-correct" class="action-button success">旧模型识别正确</button>
-            <button id="review-unknown" class="action-button warning">无法识别 / UNKNOWN</button>
-            <button id="review-needs-label" class="action-button">需要补框或重新标注</button>
-            <button id="review-skip" class="action-button subtle">跳过</button>
+            <button id="review-correct" class="action-button success">旧模型识别正确 <small>1</small></button>
+            <button id="review-unknown" class="action-button warning">无法识别 / UNKNOWN <small>4</small></button>
+            <button id="review-needs-label" class="action-button">需要补框或重新标注 <small>3</small></button>
+            <button id="review-skip" class="action-button subtle">跳过 <small>0</small></button>
             <button id="review-reopen" class="text-button">重新打开此事件</button>
           </div>
 
@@ -232,7 +240,7 @@
             <label for="class-search">改为具体式神</label>
             <input id="class-search" type="search" placeholder="输入名称、label 或稀有度">
             <select id="class-select" size="7"></select>
-            <button id="review-change" class="action-button primary">保存所选类别</button>
+            <button id="review-change" class="action-button primary">保存所选类别 <small>2</small></button>
           </div>
 
           <label for="review-note" class="field-label">审核备注</label>

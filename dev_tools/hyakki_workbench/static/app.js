@@ -5,6 +5,8 @@ const state = {
   reviewFilter: 'high',
   reviewEvent: null,
   reviewImageIndex: 0,
+  reviewItems: [],
+  reviewSelectedClassId: null,
   classes: null,
   labelPackage: null,
   datasetReadiness: null,
@@ -458,6 +460,7 @@ async function loadReviewQueue(selectFirst = false) {
   list.textContent = '正在读取…';
   try {
     const payload = await api(reviewQuery(state.reviewFilter));
+    state.reviewItems = payload.items || [];
     $('#review-total').textContent = payload.total ?? 0;
     if (!payload.items?.length) {
       list.textContent = '当前筛选下没有事件。';
@@ -540,9 +543,11 @@ function renderClassOptions() {
     if (!query) return true;
     return `${item.label} ${item.name} ${item.rarity}`.toLowerCase().includes(query);
   });
-  $('#class-select').innerHTML = options.map((item) => `
+  $('#class-select').innerHTML = '<option value="">选择具体式神（可先搜索）</option>' + options.map((item) => `
     <option value="${item.class_id}">${escapeHtml(item.rarity)} · ${escapeHtml(item.name)} · ${escapeHtml(item.label)}</option>
   `).join('');
+  $('#class-select').value = '';
+  state.reviewSelectedClassId = null;
 }
 
 async function selectReviewEvent(eventId) {
@@ -551,7 +556,10 @@ async function selectReviewEvent(eventId) {
     const event = await api(`/api/events/${encodeURIComponent(eventId)}`);
     state.reviewEvent = event;
     state.reviewImageIndex = 0;
+    state.reviewSelectedClassId = null;
     state.labelPackage = null;
+    $('#class-search').value = '';
+    renderClassOptions();
     $$('.review-item').forEach((item) => item.classList.toggle('active', item.dataset.reviewId === eventId));
     $('#review-empty').hidden = true;
     $('#review-content').hidden = false;
@@ -573,8 +581,10 @@ async function selectReviewEvent(eventId) {
   }
 }
 
-async function reviewAction(action, classId = null) {
+async function reviewAction(action, classId = null, { advance = true, prepare = false } = {}) {
   if (!state.reviewEvent) return;
+  const currentIndex = state.reviewItems.findIndex((item) => item.id === state.reviewEvent.id);
+  const nextId = currentIndex >= 0 ? state.reviewItems[currentIndex + 1]?.id : null;
   try {
     const result = await api(`/api/events/${encodeURIComponent(state.reviewEvent.id)}/review`, {
       method: 'POST',
@@ -584,19 +594,41 @@ async function reviewAction(action, classId = null) {
         note: $('#review-note').value,
       }),
     });
+    if (prepare && action === 'needs_label') {
+      state.labelPackage = await api(
+        `/api/events/${encodeURIComponent(result.id)}/prepare-label`,
+        { method: 'POST' },
+      );
+    }
     toast(`已保存：${result.status}`);
-    state.reviewEvent = result;
     await refreshStatus();
     await loadReviewQueue(false);
-    if (state.reviewFilter === 'reviewed') {
+    if (!advance) {
       await selectReviewEvent(result.id);
+      return;
+    }
+    const target = state.reviewItems.find((item) => item.id === nextId) || state.reviewItems[0];
+    if (target) {
+      await selectReviewEvent(target.id);
     } else {
-      const first = document.querySelector('.review-item');
-      if (first) await selectReviewEvent(first.dataset.reviewId);
+      clearReviewSelection('当前筛选下没有更多事件。');
     }
   } catch (error) {
     toast(`保存失败：${error.message}`);
   }
+}
+
+async function moveReview(direction) {
+  if (!state.reviewItems.length) return;
+  const currentIndex = state.reviewEvent
+    ? state.reviewItems.findIndex((item) => item.id === state.reviewEvent.id)
+    : -1;
+  const targetIndex = currentIndex + direction;
+  if (targetIndex < 0 || targetIndex >= state.reviewItems.length) {
+    toast(direction > 0 ? '已经是队列最后一事件。' : '已经是队列第一事件。');
+    return;
+  }
+  await selectReviewEvent(state.reviewItems[targetIndex].id);
 }
 
 async function prepareLabelPackage() {
@@ -964,18 +996,20 @@ $('#frame-tabs').addEventListener('click', (event) => {
 $('#review-image').addEventListener('load', updateReviewBox);
 window.addEventListener('resize', updateReviewBox);
 $('#class-search').addEventListener('input', renderClassOptions);
+$('#class-select').addEventListener('change', (event) => {
+  state.reviewSelectedClassId = event.target.value ? Number(event.target.value) : null;
+});
 $('#review-correct').addEventListener('click', () => reviewAction('correct'));
 $('#review-unknown').addEventListener('click', () => reviewAction('unknown'));
-$('#review-needs-label').addEventListener('click', () => reviewAction('needs_label'));
+$('#review-needs-label').addEventListener('click', () => reviewAction('needs_label', null, { prepare: true }));
 $('#review-skip').addEventListener('click', () => reviewAction('skip'));
-$('#review-reopen').addEventListener('click', () => reviewAction('reopen'));
+$('#review-reopen').addEventListener('click', () => reviewAction('reopen', null, { advance: false }));
 $('#review-change').addEventListener('click', () => {
-  const value = $('#class-select').value;
-  if (!value) {
+  if (!state.reviewSelectedClassId) {
     toast('请先选择一个具体式神类别。');
     return;
   }
-  reviewAction('change', Number(value));
+  reviewAction('change', state.reviewSelectedClassId);
 });
 $('#prepare-label').addEventListener('click', prepareLabelPackage);
 $('#copy-label-folder').addEventListener('click', async () => {
@@ -1214,6 +1248,41 @@ document.addEventListener('keydown', (event) => {
   } else if (event.key === 'ArrowLeft') {
     event.preventDefault();
     moveScan(-1);
+  }
+});
+document.addEventListener('keydown', (event) => {
+  if (!$('#page-review').classList.contains('active')) return;
+  if (event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+  if (event.key === '1') {
+    event.preventDefault();
+    if (state.reviewEvent?.old_class_id == null) {
+      toast('旧模型没有给出类别，请选择真实类别或标记 UNKNOWN。');
+      return;
+    }
+    reviewAction('correct');
+  } else if (event.key === '2') {
+    event.preventDefault();
+    if (!state.reviewSelectedClassId) {
+      $('#class-search').focus();
+      toast('搜索并选择一个具体式神，再按 2 保存。');
+      return;
+    }
+    reviewAction('change', state.reviewSelectedClassId);
+  } else if (event.key === '3') {
+    event.preventDefault();
+    reviewAction('needs_label', null, { prepare: true });
+  } else if (event.key === '4') {
+    event.preventDefault();
+    reviewAction('unknown');
+  } else if (event.key === '0') {
+    event.preventDefault();
+    reviewAction('skip');
+  } else if (event.key === 'ArrowRight') {
+    event.preventDefault();
+    moveReview(1);
+  } else if (event.key === 'ArrowLeft') {
+    event.preventDefault();
+    moveReview(-1);
   }
 });
 $('#model-versions').addEventListener('click', async (event) => {
