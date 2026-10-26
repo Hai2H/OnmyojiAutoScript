@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 import threading
 import webbrowser
 from contextlib import contextmanager
@@ -12,9 +13,20 @@ from typing import Iterator
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 
 from .paths import WorkspacePaths
 from .store import WorkbenchStore
+
+
+class ReviewRequest(BaseModel):
+    action: str = Field(pattern='^(correct|change|unknown|needs_label|skip|reopen)$')
+    class_id: int | None = None
+    note: str = ''
+
+
+class XAnyConfigRequest(BaseModel):
+    executable: str = ''
 
 
 def create_app(paths: WorkspacePaths | None = None) -> FastAPI:
@@ -89,6 +101,78 @@ def create_app(paths: WorkspacePaths | None = None) -> FastAPI:
                 limit=limit,
                 offset=offset,
             )
+
+    @app.get('/api/events/{event_id}')
+    def event_detail(event_id: str) -> dict:
+        with open_store() as catalog:
+            event = catalog.get_event(event_id)
+            if not event:
+                raise HTTPException(status_code=404, detail='事件不存在')
+            event['review_history'] = catalog.review_history(event_id)
+            return event
+
+    @app.post('/api/events/{event_id}/review')
+    def review_event(event_id: str, request: ReviewRequest) -> dict:
+        with open_store() as catalog:
+            try:
+                return catalog.review_event(
+                    event_id,
+                    action=request.action,
+                    class_id=request.class_id,
+                    note=request.note,
+                )
+            except KeyError as exception:
+                raise HTTPException(status_code=404, detail='事件不存在') from exception
+            except ValueError as exception:
+                raise HTTPException(status_code=422, detail=str(exception)) from exception
+
+    @app.post('/api/events/{event_id}/prepare-label')
+    def prepare_label(event_id: str) -> dict:
+        with open_store() as catalog:
+            try:
+                return catalog.prepare_label_package(event_id)
+            except KeyError as exception:
+                raise HTTPException(status_code=404, detail='事件不存在') from exception
+
+    @app.get('/api/classes')
+    def classes(
+        query: str = '',
+        rarity: str | None = None,
+        limit: int = Query(default=300, ge=1, le=500),
+    ) -> dict:
+        with open_store() as catalog:
+            return {'items': catalog.list_classes(query=query, rarity=rarity, limit=limit)}
+
+    @app.get('/api/xany')
+    def xany_config() -> dict:
+        with open_store() as catalog:
+            executable = catalog.get_setting('xany_executable', '') or ''
+            return {
+                'executable': executable,
+                'exists': bool(executable and Path(executable).is_file()),
+                'url': 'https://github.com/CVHub520/X-AnyLabeling',
+            }
+
+    @app.post('/api/xany/config')
+    def configure_xany(request: XAnyConfigRequest) -> dict:
+        executable = request.executable.strip()
+        if executable and not Path(executable).is_file():
+            raise HTTPException(status_code=422, detail='X-AnyLabeling 可执行文件不存在')
+        with open_store() as catalog:
+            catalog.set_setting('xany_executable', executable)
+        return {'ok': True, 'executable': executable}
+
+    @app.post('/api/xany/launch')
+    def launch_xany() -> dict:
+        with open_store() as catalog:
+            executable = catalog.get_setting('xany_executable', '') or ''
+        if not executable or not Path(executable).is_file():
+            raise HTTPException(status_code=422, detail='请先配置 X-AnyLabeling 可执行文件')
+        try:
+            subprocess.Popen([executable], cwd=str(Path(executable).parent))
+        except OSError as exception:
+            raise HTTPException(status_code=500, detail=f'启动失败：{exception}') from exception
+        return {'ok': True}
 
     @app.get('/api/events/{event_id}/image/{image_index}')
     def event_image(event_id: str, image_index: int) -> FileResponse:

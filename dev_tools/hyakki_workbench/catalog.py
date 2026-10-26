@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import sqlite3
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -134,6 +136,28 @@ CREATE INDEX IF NOT EXISTS idx_events_review
     ON events(status, needs_review, rarity, source_kind);
 CREATE INDEX IF NOT EXISTS idx_events_round ON events(round_id);
 CREATE INDEX IF NOT EXISTS idx_events_updated ON events(updated_at);
+
+CREATE TABLE IF NOT EXISTS review_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    previous_status TEXT,
+    new_status TEXT NOT NULL,
+    old_class_id INTEGER,
+    reviewed_class_id INTEGER,
+    reviewed_label TEXT,
+    note TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_review_history_event
+    ON review_history(event_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -211,6 +235,10 @@ class Catalog:
         self.label_to_class = {
             row['label']: class_id for class_id, row in SHIKIGAMI_TABLE.items()
         }
+
+    def _ensure_class_table(self) -> None:
+        if not self.class_table:
+            self._load_class_table()
 
     def _row_for(self, class_id: int | None) -> dict:
         if class_id is None:
@@ -448,7 +476,7 @@ class Catalog:
         }
         pending_high = self.connection.execute(
             "SELECT COUNT(*) FROM events "
-            "WHERE status = 'pending' AND rarity IN ('SSR', 'SP', 'UR')"
+            "WHERE status IN ('pending', 'needs_label') AND rarity IN ('SSR', 'SP', 'UR')"
         ).fetchone()[0]
         scanned = self.connection.execute(
             'SELECT scanned_at FROM scan_runs ORDER BY id DESC LIMIT 1'
@@ -508,8 +536,14 @@ class Catalog:
         clauses = []
         values: list[Any] = []
         if status:
-            clauses.append('status = ?')
-            values.append(status)
+            statuses = [item.strip() for item in status.split(',') if item.strip()]
+            if len(statuses) == 1:
+                clauses.append('status = ?')
+                values.append(statuses[0])
+            elif statuses:
+                placeholders = ', '.join('?' for _ in statuses)
+                clauses.append(f'status IN ({placeholders})')
+                values.extend(statuses)
         if source:
             clauses.append('source_kind = ?')
             values.append(source)
@@ -541,3 +575,226 @@ class Catalog:
             'SELECT * FROM events WHERE id = ?', (event_id,)
         ).fetchone()
         return self._event_payload(row) if row else None
+
+    def list_classes(
+        self,
+        *,
+        query: str = '',
+        rarity: str | None = None,
+        limit: int = 300,
+    ) -> list[dict]:
+        self._ensure_class_table()
+        needle = query.strip().lower()
+        rows = []
+        for class_id, row in self.class_table.items():
+            if rarity and row['rarity'] != rarity:
+                continue
+            haystack = f"{row['label']} {row['name']} {row['rarity']}".lower()
+            if needle and needle not in haystack:
+                continue
+            rows.append({
+                'class_id': class_id,
+                'label': row['label'],
+                'name': row['name'],
+                'rarity': row['rarity'],
+                'released': row['released'],
+            })
+        rarity_order = {'UR': 0, 'SP': 1, 'SSR': 2, 'SR': 3, 'R': 4, 'N': 5, 'G': 6, 'BUFF': 7}
+        rows.sort(key=lambda item: (
+            rarity_order.get(item['rarity'], 99),
+            item['released'] or '',
+            item['class_id'],
+        ))
+        return rows[:max(1, min(int(limit), 500))]
+
+    def review_event(
+        self,
+        event_id: str,
+        *,
+        action: str,
+        class_id: int | None = None,
+        note: str = '',
+    ) -> dict:
+        self._ensure_class_table()
+        event = self.get_event(event_id)
+        if not event:
+            raise KeyError(event_id)
+        action = action.strip().lower()
+        previous_status = event['status']
+        reviewed_class_id = event.get('reviewed_class_id')
+        reviewed_label = event.get('reviewed_label')
+        status = previous_status
+
+        if action == 'correct':
+            reviewed_class_id = event.get('old_class_id')
+            if reviewed_class_id is None:
+                raise ValueError('旧模型没有给出类别，请选择具体式神或标记 UNKNOWN')
+            row = self.class_table.get(int(reviewed_class_id))
+            if not row:
+                raise ValueError('旧类别不在 268 类登记表中，请手动选择类别')
+            reviewed_label = row['label']
+            status = 'correct'
+        elif action == 'change':
+            if class_id is None:
+                raise ValueError('改类别时必须提供 class_id')
+            row = self.class_table.get(int(class_id))
+            if not row:
+                raise ValueError('未知的 class_id')
+            reviewed_class_id = int(class_id)
+            reviewed_label = row['label']
+            status = 'changed'
+        elif action == 'unknown':
+            reviewed_class_id = None
+            reviewed_label = 'UNKNOWN'
+            status = 'unknown'
+        elif action == 'needs_label':
+            reviewed_class_id = None
+            reviewed_label = 'UNKNOWN'
+            status = 'needs_label'
+        elif action == 'skip':
+            status = 'skipped'
+        elif action == 'reopen':
+            reviewed_class_id = None
+            reviewed_label = None
+            status = 'pending'
+        else:
+            raise ValueError('不支持的审核动作')
+
+        now = _now()
+        self.connection.execute(
+            """
+            UPDATE events SET
+                status = ?, reviewed_class_id = ?, reviewed_label = ?,
+                review_note = ?, reviewed_at = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                status,
+                reviewed_class_id,
+                reviewed_label,
+                note.strip() or None,
+                None if status == 'pending' else now,
+                now,
+                event_id,
+            ),
+        )
+        self.connection.execute(
+            """
+            INSERT INTO review_history (
+                event_id, action, previous_status, new_status, old_class_id,
+                reviewed_class_id, reviewed_label, note, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event_id,
+                action,
+                previous_status,
+                status,
+                event.get('old_class_id'),
+                reviewed_class_id,
+                reviewed_label,
+                note.strip() or None,
+                now,
+            ),
+        )
+        self.connection.commit()
+        return self.get_event(event_id)
+
+    def review_history(self, event_id: str) -> list[dict]:
+        return [
+            dict(row)
+            for row in self.connection.execute(
+                'SELECT * FROM review_history WHERE event_id = ? ORDER BY id DESC',
+                (event_id,),
+            ).fetchall()
+        ]
+
+    def get_setting(self, key: str, default: str | None = None) -> str | None:
+        row = self.connection.execute(
+            'SELECT value FROM settings WHERE key = ?', (key,)
+        ).fetchone()
+        return row['value'] if row else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO settings(key, value, updated_at) VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+            """,
+            (key, value, _now()),
+        )
+        self.connection.commit()
+
+    def prepare_label_package(self, event_id: str) -> dict:
+        """Create a stable X-AnyLabeling folder without replacing reviewed JSON."""
+        self._ensure_class_table()
+        event = self.get_event(event_id)
+        if not event:
+            raise KeyError(event_id)
+        slug = event_id.replace(':', '_').replace('/', '_')
+        target = self.paths.state_root / 'review' / slug
+        target.mkdir(parents=True, exist_ok=True)
+        (target / 'classes.txt').write_text(
+            '\n'.join(
+                f"{row['label']} {row['name']}"
+                for _, row in sorted(self.class_table.items())
+            ) + '\n',
+            encoding='utf-8',
+        )
+        images = event.get('representatives') or []
+        files = []
+        for index, representative in enumerate(images):
+            source = Path(representative['image_path'])
+            suffix = source.suffix.lower() or '.jpg'
+            image_name = f'{index + 1:02d}_{source.stem}{suffix}'
+            image_target = target / image_name
+            if not image_target.exists():
+                try:
+                    os.link(source, image_target)
+                except OSError:
+                    shutil.copy2(source, image_target)
+            annotation_path = image_target.with_suffix('.json')
+            if not annotation_path.exists():
+                box = representative.get('box')
+                label = event.get('reviewed_label') or event.get('old_label') or 'UNKNOWN'
+                shapes = []
+                if box:
+                    shapes.append({
+                        'label': label,
+                        'points': [[box['x1'], box['y1']], [box['x2'], box['y2']]],
+                        'group_id': None,
+                        'shape_type': 'rectangle',
+                        'flags': {'source': 'old_model'},
+                        'description': '旧模型预标注，必须人工确认',
+                    })
+                payload = {
+                    'version': '4.1.1',
+                    'flags': {
+                        'model_suggestion': True,
+                        'reviewed': False,
+                        'workbench_event': event_id,
+                    },
+                    'shapes': shapes,
+                    'imagePath': image_name,
+                    'imageData': None,
+                    'imageHeight': None,
+                    'imageWidth': None,
+                }
+                annotation_path.write_text(
+                    json.dumps(payload, ensure_ascii=False, indent=1),
+                    encoding='utf-8',
+                )
+            files.append({
+                'image': str(image_target),
+                'annotation': str(annotation_path),
+            })
+        (target / 'event.json').write_text(
+            json.dumps(event, ensure_ascii=False, indent=1),
+            encoding='utf-8',
+        )
+        return {
+            'folder': str(target),
+            'classes': str(target / 'classes.txt'),
+            'files': files,
+            'xanylabeling_url': 'https://github.com/CVHub520/X-AnyLabeling',
+        }

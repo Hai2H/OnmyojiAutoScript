@@ -93,6 +93,27 @@ class WorkbenchCatalogTest(unittest.TestCase):
             self.assertEqual(summary['events'], 3)
             self.assertEqual(summary['pending_high_rarity'], 2)
             self.assertEqual(summary['rounds'], {'bean': 1, 'boss': 1})
+
+            reviewed = store.review_event('bean:2026-10-26_12-00-00_r001:7', action='correct')
+            self.assertEqual(reviewed['status'], 'correct')
+            self.assertEqual(reviewed['reviewed_label'], 'ssr_075')
+            self.assertEqual(store.review_history(reviewed['id'])[0]['action'], 'correct')
+
+            candidates = store.list_classes(query='百羽凤凰火')
+            self.assertEqual(candidates[0]['label'], 'sp_051')
+            changed = store.review_event(
+                'boss:2026-10-26_12-01-00_001:2',
+                action='change',
+                class_id=candidates[0]['class_id'],
+                note='旧模型未识别',
+            )
+            self.assertEqual(changed['status'], 'changed')
+            self.assertEqual(changed['reviewed_label'], 'sp_051')
+
+            package = store.prepare_label_package(reviewed['id'])
+            self.assertTrue((Path(package['folder']) / 'classes.txt').is_file())
+            self.assertEqual(len(package['files']), 2)
+            self.assertTrue(Path(package['files'][0]['annotation']).is_file())
         finally:
             store.close()
 

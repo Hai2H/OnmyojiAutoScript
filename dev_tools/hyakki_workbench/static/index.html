@@ -73,11 +73,87 @@
       </article>
     </section>
     <section id="page-review" class="page">
-      <article class="panel placeholder">
-        <p class="eyebrow">REVIEW</p>
-        <h2>审核页</h2>
-        <p>按一次目标出现审核代表帧，正确、改类别、未知或送入 X-AnyLabeling。</p>
-      </article>
+      <div class="review-header">
+        <div>
+          <p class="eyebrow">REVIEW EVENTS</p>
+          <h2>确认这一次出现</h2>
+          <p class="hint">预标注不是真值。先确认具体式神；需要补框或漏框时再送入 X-AnyLabeling。</p>
+        </div>
+        <div class="segmented" id="review-filters">
+          <button class="active" data-filter="high">高稀有度</button>
+          <button data-filter="pending">全部待审核</button>
+          <button data-filter="unknown">未知 / 待重标</button>
+          <button data-filter="reviewed">已审核</button>
+        </div>
+      </div>
+      <div class="review-layout">
+        <aside class="panel review-queue">
+          <div class="panel-title">
+            <h3>审核队列</h3>
+            <span id="review-total" class="muted">0</span>
+          </div>
+          <div id="review-list" class="review-list empty">正在读取…</div>
+        </aside>
+
+        <article class="panel review-stage">
+          <div id="review-empty" class="empty-stage">
+            <strong>选择一个事件开始审核</strong>
+            <span>可选择正确、具体式神、未知或需要重新标注。</span>
+          </div>
+          <div id="review-content" class="review-content" hidden>
+            <div class="frame-tabs" id="frame-tabs"></div>
+            <div class="image-shell">
+              <img id="review-image" alt="目标代表帧">
+              <span id="review-box" class="target-box" hidden></span>
+            </div>
+            <div class="prediction-row">
+              <div><span>旧模型</span><strong id="old-identity">—</strong></div>
+              <div><span>稀有度</span><strong id="old-rarity">—</strong></div>
+              <div><span>最高置信度</span><strong id="old-confidence">—</strong></div>
+              <div><span>出现帧数</span><strong id="frame-count">—</strong></div>
+            </div>
+            <div id="suspicion-list" class="tag-list"></div>
+          </div>
+        </article>
+
+        <aside class="panel review-actions">
+          <div>
+            <h3>人工结论</h3>
+            <p class="muted small">旧模型正确时直接确认；不正确时选择真实类别。</p>
+            <button id="review-correct" class="action-button success">旧模型识别正确</button>
+            <button id="review-unknown" class="action-button warning">无法识别 / UNKNOWN</button>
+            <button id="review-needs-label" class="action-button">需要补框或重新标注</button>
+            <button id="review-skip" class="action-button subtle">跳过</button>
+            <button id="review-reopen" class="text-button">重新打开此事件</button>
+          </div>
+
+          <div class="class-picker">
+            <label for="class-search">改为具体式神</label>
+            <input id="class-search" type="search" placeholder="输入名称、label 或稀有度">
+            <select id="class-select" size="7"></select>
+            <button id="review-change" class="action-button primary">保存所选类别</button>
+          </div>
+
+          <label for="review-note" class="field-label">审核备注</label>
+          <textarea id="review-note" rows="3" placeholder="可选：记录混淆、遮挡或特效原因"></textarea>
+
+          <div class="label-package">
+            <h3>X-AnyLabeling</h3>
+            <button id="prepare-label" class="action-button">生成标注目录</button>
+            <p id="label-folder" class="path-output">尚未生成</p>
+            <div class="inline-actions">
+              <button id="copy-label-folder" class="text-button" disabled>复制路径</button>
+              <button id="launch-xany" class="text-button">启动程序</button>
+              <a href="https://github.com/CVHub520/X-AnyLabeling" target="_blank" rel="noreferrer">官方仓库</a>
+            </div>
+            <details>
+              <summary>配置程序路径</summary>
+              <input id="xany-executable" type="text" placeholder="X-AnyLabeling.exe 的完整路径">
+              <button id="save-xany" class="text-button">保存路径</button>
+            </details>
+          </div>
+        </aside>
+      </div>
     </section>
     <section id="page-dataset" class="page">
       <article class="panel placeholder">
