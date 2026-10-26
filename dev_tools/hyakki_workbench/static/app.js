@@ -351,6 +351,7 @@ function renderScanDetail(frame) {
   $('#scan-tags').innerHTML = (frame.suspicion || [])
     .map((item) => `<span class="tag">${escapeHtml(suspicionLabels[item] || item)}</span>`).join('');
   $('#scan-package').textContent = '尚未生成标注目录';
+  $('#scan-classes').textContent = '类别文件将在生成目录后显示';
   $('#scan-open-folder').disabled = true;
   const shapes = frame.manual_shapes || [];
   $('#scan-manual-shapes').innerHTML = shapes.length
@@ -574,6 +575,7 @@ async function selectReviewEvent(eventId) {
     $('#review-correct').disabled = event.old_class_id === null;
     $('#review-note').value = event.review_note || '';
     $('#label-folder').textContent = '尚未生成';
+    $('#label-classes').textContent = '类别文件将在生成目录后显示';
     $('#copy-label-folder').disabled = true;
     renderReviewFrame(0);
   } catch (error) {
@@ -639,6 +641,7 @@ async function prepareLabelPackage() {
     });
     state.labelPackage = result;
     $('#label-folder').textContent = result.folder;
+    $('#label-classes').textContent = result.classes;
     $('#copy-label-folder').disabled = false;
     toast('标注目录已生成。目录中已有的人工 JSON 不会被覆盖。');
   } catch (error) {
@@ -1179,6 +1182,7 @@ $('#scan-prepare').addEventListener('click', async () => {
     });
     state.scanPackage = packageInfo;
     $('#scan-package').textContent = packageInfo.folder;
+    $('#scan-classes').textContent = packageInfo.classes;
     $('#scan-open-folder').disabled = false;
     toast('标注目录已生成。');
   } catch (error) {

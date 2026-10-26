@@ -626,6 +626,20 @@ kbd {
   color: #a7f3d0;
   font-size: 10px;
 }
+.label-guide {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid #2b3b47;
+  border-radius: 8px;
+  background: rgba(11, 17, 22, .62);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.65;
+}
+.label-guide strong { display: block; margin-bottom: 4px; color: var(--text); font-size: 11px; }
+.label-guide ol { margin: 0; padding-left: 18px; }
+.label-guide li + li { margin-top: 3px; }
+.label-guide code { color: #a7f3d0; font-family: Consolas, monospace; }
 .scan-detail details { margin-top: 12px; }
 .scan-detail summary { color: var(--muted); font-size: 11px; cursor: pointer; }
 .scan-detail details input {

@@ -301,10 +301,25 @@ class Catalog:
         self.label_to_class = {
             row['label']: class_id for class_id, row in SHIKIGAMI_TABLE.items()
         }
+        self.xany_label_to_class = {
+            f"{row['label']} {row['name']}": class_id
+            for class_id, row in SHIKIGAMI_TABLE.items()
+        }
 
     def _ensure_class_table(self) -> None:
         if not self.class_table:
             self._load_class_table()
+
+    def _class_id_from_xany_label(self, label: str | None) -> int | None:
+        if not label:
+            return None
+        self._ensure_class_table()
+        normalized = ' '.join(str(label).split())
+        return (
+            self.label_to_class.get(normalized)
+            or self.xany_label_to_class.get(normalized)
+            or self.label_to_class.get(normalized.split(' ', 1)[0])
+        )
 
     def _row_for(self, class_id: int | None) -> dict:
         if class_id is None:
@@ -955,9 +970,11 @@ class Catalog:
         if not annotation_path.exists():
             shapes = []
             for track in frame.get('tracks') or []:
-                label = track.get('label')
-                if not label:
+                class_id = self._class_id_from_xany_label(track.get('label'))
+                row = self.class_table.get(class_id, {}) if class_id is not None else {}
+                if not row:
                     continue
+                label = f"{row['label']} {row['name']}"
                 box = track['box']
                 shapes.append({
                     'label': label,
@@ -1007,11 +1024,11 @@ class Catalog:
         now = _now()
         for shape in payload.get('shapes') or []:
             label = shape.get('label')
-            class_id = self.label_to_class.get(label)
+            class_id = self._class_id_from_xany_label(label)
             box = self._shape_box(shape)
             if class_id is None or box is None:
                 continue
-            imported.append((int(class_id), label, box))
+            imported.append((int(class_id), self.class_table[class_id]['label'], box))
         if not imported:
             raise ValueError('标注结果中没有可用类别和矩形框')
         self.connection.execute('DELETE FROM manual_shapes WHERE frame_id=?', (frame_id,))
@@ -1234,6 +1251,10 @@ class Catalog:
             if not annotation_path.exists():
                 box = representative.get('box')
                 label = event.get('reviewed_label') or event.get('old_label') or 'UNKNOWN'
+                class_id = self._class_id_from_xany_label(label)
+                class_row = self.class_table.get(class_id, {}) if class_id is not None else {}
+                if class_row:
+                    label = f"{class_row['label']} {class_row['name']}"
                 shapes = []
                 if box:
                     shapes.append({
@@ -1335,7 +1356,7 @@ class Catalog:
             resolved = []
             for shape in shapes:
                 label = shape.get('label')
-                class_id = self.label_to_class.get(label)
+                class_id = self._class_id_from_xany_label(label)
                 box = self._shape_box(shape)
                 if class_id is None or box is None:
                     continue
@@ -1347,7 +1368,11 @@ class Catalog:
             preferred = [
                 item for item in resolved
                 if (preferred_class_id is not None and item[1] == int(preferred_class_id))
-                or (preferred_label and item[0].get('label') == preferred_label)
+                or (
+                    preferred_label
+                    and self._class_id_from_xany_label(item[0].get('label'))
+                    == self._class_id_from_xany_label(preferred_label)
+                )
             ]
             pool = preferred or resolved
             old_box = representative.get('box')

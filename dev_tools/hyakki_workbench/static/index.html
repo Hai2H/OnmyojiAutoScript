@@ -162,7 +162,19 @@
                 <button id="scan-launch-xany" class="text-button">启动 X-AnyLabeling</button>
               </div>
               <p id="scan-package" class="path-output">尚未生成标注目录</p>
+              <p id="scan-classes" class="path-output">类别文件将在生成目录后显示</p>
               <div id="scan-manual-shapes" class="manual-shapes">尚无人工框</div>
+              <div class="label-guide">
+                <strong>标注顺序</strong>
+                <ol>
+                  <li>启动 X-AnyLabeling，按 <kbd>Ctrl+U</kbd> 打开上面目录。</li>
+                  <li>通过“上传/加载标签”选择同目录的 <code>classes.txt</code>。</li>
+                  <li>按 <kbd>R</kbd> 画矩形框，框住式神主体；旧框错误就修改或删除。</li>
+                  <li>为每个框选择具体式神类别，可在一张图里画多个框。</li>
+                  <li>按 <kbd>Ctrl+S</kbd> 确认 JSON 已保存。</li>
+                  <li>回到工作台点击“导入人工框”。</li>
+                </ol>
+              </div>
               <details>
                 <summary>配置 X-AnyLabeling 程序路径</summary>
                 <input id="scan-xany-executable" type="text" placeholder="X-AnyLabeling.exe 的完整路径">
@@ -250,11 +262,20 @@
             <h3>X-AnyLabeling</h3>
             <button id="prepare-label" class="action-button">生成标注目录</button>
             <p id="label-folder" class="path-output">尚未生成</p>
+            <p id="label-classes" class="path-output">类别文件将在生成目录后显示</p>
             <div class="inline-actions">
               <button id="copy-label-folder" class="text-button" disabled>复制路径</button>
               <button id="import-label" class="text-button">导入标注结果</button>
               <button id="launch-xany" class="text-button">启动程序</button>
               <a href="https://github.com/CVHub520/X-AnyLabeling" target="_blank" rel="noreferrer">官方仓库</a>
+            </div>
+            <div class="label-guide">
+              <strong>标注顺序</strong>
+              <ol>
+                <li><kbd>Ctrl+U</kbd> 打开目录；从“上传/加载标签”选择 <code>classes.txt</code>。</li>
+                <li>按 <kbd>R</kbd> 画框，调整旧预框并选择正确类别。</li>
+                <li><kbd>Ctrl+S</kbd> 保存 JSON，然后回到这里点击“导入标注结果”。</li>
+              </ol>
             </div>
             <details>
               <summary>配置程序路径</summary>

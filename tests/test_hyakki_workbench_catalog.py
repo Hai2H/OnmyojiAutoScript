@@ -121,7 +121,7 @@ class WorkbenchCatalogTest(unittest.TestCase):
             raw_annotation = Path(raw_package['annotation'])
             raw_payload = json.loads(raw_annotation.read_text(encoding='utf-8'))
             raw_payload['shapes'].append({
-                'label': 'sp_051',
+                'label': 'sp_051 百羽凤凰火',
                 'points': [[20, 30], [120, 150]],
                 'shape_type': 'rectangle',
             })
@@ -157,7 +157,7 @@ class WorkbenchCatalogTest(unittest.TestCase):
             annotation_path = Path(boss_package['files'][0]['annotation'])
             annotation = json.loads(annotation_path.read_text(encoding='utf-8'))
             annotation['shapes'] = [{
-                'label': 'sp_051',
+                'label': 'sp_051 百羽凤凰火',
                 'points': [[20, 30], [120, 150]],
                 'shape_type': 'rectangle',
             }]
