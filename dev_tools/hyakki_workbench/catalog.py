@@ -1,0 +1,543 @@
+"""Index captured Hyakki rounds into reviewable target events."""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from collections import Counter, defaultdict
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Iterable
+
+from .paths import WorkspacePaths
+
+
+HIGH_RARITIES = {'SSR', 'SP', 'UR'}
+LOW_CONFIDENCE = 0.60
+REPRESENTATIVE_LIMIT = 3
+
+
+def _now() -> str:
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+
+
+def _read_json(path: Path, default: Any = None) -> Any:
+    try:
+        return json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError):
+        return default
+
+
+def _iter_directories(root: Path) -> Iterable[Path]:
+    if not root.is_dir():
+        return []
+    return sorted(item for item in root.iterdir() if item.is_dir())
+
+
+def _iter_frames(path: Path) -> Iterable[dict]:
+    try:
+        lines = path.read_text(encoding='utf-8').splitlines()
+    except OSError:
+        return
+    for line in lines:
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            yield payload
+
+
+def _track_box(track: list | tuple) -> dict[str, float]:
+    cx, cy, width, height = (float(track[3]), float(track[4]),
+                             float(track[5]), float(track[6]))
+    return {
+        'x1': round(cx - width / 2, 2),
+        'y1': round(cy - height / 2, 2),
+        'x2': round(cx + width / 2, 2),
+        'y2': round(cy + height / 2, 2),
+    }
+
+
+def _box_area(track: list | tuple) -> float:
+    return float(track[5]) * float(track[6])
+
+
+@dataclass(frozen=True)
+class ScanResult:
+    bean_rounds: int
+    boss_rounds: int
+    events_seen: int
+    events_upserted: int
+    high_rarity_events: int
+    suspicious_events: int
+    scanned_at: str
+
+    def as_dict(self) -> dict:
+        return {
+            'bean_rounds': self.bean_rounds,
+            'boss_rounds': self.boss_rounds,
+            'events_seen': self.events_seen,
+            'events_upserted': self.events_upserted,
+            'high_rarity_events': self.high_rarity_events,
+            'suspicious_events': self.suspicious_events,
+            'scanned_at': self.scanned_at,
+        }
+
+
+SCHEMA = """
+PRAGMA journal_mode=WAL;
+
+CREATE TABLE IF NOT EXISTS scan_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scanned_at TEXT NOT NULL,
+    bean_rounds INTEGER NOT NULL,
+    boss_rounds INTEGER NOT NULL,
+    events_seen INTEGER NOT NULL,
+    events_upserted INTEGER NOT NULL,
+    result_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS events (
+    id TEXT PRIMARY KEY,
+    source_kind TEXT NOT NULL,
+    round_id TEXT NOT NULL,
+    track_key TEXT NOT NULL,
+    old_class_id INTEGER,
+    old_label TEXT,
+    old_name TEXT,
+    rarity TEXT,
+    confidence REAL,
+    first_frame TEXT,
+    last_frame TEXT,
+    frame_count INTEGER NOT NULL DEFAULT 1,
+    image_path TEXT NOT NULL,
+    box_json TEXT,
+    representatives_json TEXT NOT NULL,
+    suspicion TEXT NOT NULL DEFAULT '[]',
+    needs_review INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'pending',
+    reviewed_class_id INTEGER,
+    reviewed_label TEXT,
+    review_note TEXT,
+    reviewed_at TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_review
+    ON events(status, needs_review, rarity, source_kind);
+CREATE INDEX IF NOT EXISTS idx_events_round ON events(round_id);
+CREATE INDEX IF NOT EXISTS idx_events_updated ON events(updated_at);
+"""
+
+
+class Catalog:
+    """Scanning and query layer shared by the API and dataset builder."""
+
+    def __init__(self, paths: WorkspacePaths, connection: sqlite3.Connection):
+        self.paths = paths
+        self.connection = connection
+        self.class_table: dict[int, dict] = {}
+        self.label_to_class: dict[str, int] = {}
+
+    @classmethod
+    def connect(cls, paths: WorkspacePaths) -> 'Catalog':
+        paths.ensure()
+        connection = sqlite3.connect(paths.database, timeout=30)
+        connection.row_factory = sqlite3.Row
+        connection.executescript(SCHEMA)
+        return cls(paths, connection)
+
+    def close(self) -> None:
+        self.connection.close()
+
+    def scan(self) -> ScanResult:
+        self._load_class_table()
+        bean_events, bean_rounds = self._scan_bean()
+        boss_events, boss_rounds = self._scan_boss()
+        events = bean_events + boss_events
+        now = _now()
+        upserted = 0
+        high_rarity = 0
+        suspicious = 0
+        for event in events:
+            existing = self.connection.execute(
+                'SELECT status, reviewed_class_id, reviewed_label, review_note, reviewed_at '
+                'FROM events WHERE id = ?',
+                (event['id'],),
+            ).fetchone()
+            if existing:
+                event.update({
+                    'status': existing['status'],
+                    'reviewed_class_id': existing['reviewed_class_id'],
+                    'reviewed_label': existing['reviewed_label'],
+                    'review_note': existing['review_note'],
+                    'reviewed_at': existing['reviewed_at'],
+                })
+            self._upsert_event(event, now)
+            upserted += 1
+            if event['rarity'] in HIGH_RARITIES:
+                high_rarity += 1
+            if event['suspicion']:
+                suspicious += 1
+        result = ScanResult(
+            bean_rounds=bean_rounds,
+            boss_rounds=boss_rounds,
+            events_seen=len(events),
+            events_upserted=upserted,
+            high_rarity_events=high_rarity,
+            suspicious_events=suspicious,
+            scanned_at=now,
+        )
+        self.connection.execute(
+            'INSERT INTO scan_runs '
+            '(scanned_at, bean_rounds, boss_rounds, events_seen, events_upserted, result_json) '
+            'VALUES (?, ?, ?, ?, ?, ?)',
+            (now, bean_rounds, boss_rounds, len(events), upserted, _json(result.as_dict())),
+        )
+        self.connection.commit()
+        return result
+
+    def _load_class_table(self) -> None:
+        from tasks.Hyakkiyakou.shikigami_table import SHIKIGAMI_TABLE
+
+        self.class_table = SHIKIGAMI_TABLE
+        self.label_to_class = {
+            row['label']: class_id for class_id, row in SHIKIGAMI_TABLE.items()
+        }
+
+    def _row_for(self, class_id: int | None) -> dict:
+        if class_id is None:
+            return {}
+        return self.class_table.get(int(class_id), {})
+
+    def _event_from_track(
+        self,
+        *,
+        round_id: str,
+        track_id: int,
+        history: list[dict],
+    ) -> dict:
+        classes = [int(item['track'][1]) for item in history]
+        class_counts = Counter(classes)
+        class_id = class_counts.most_common(1)[0][0]
+        row = self._row_for(class_id)
+
+        flips = sum(left != right for left, right in zip(classes, classes[1:]))
+        lowest_confidence = min(float(item['track'][2]) for item in history)
+        suspicion = []
+        if flips:
+            suspicion.append('class_flip')
+        if lowest_confidence < LOW_CONFIDENCE:
+            suspicion.append('low_confidence')
+        if row.get('rarity') in HIGH_RARITIES:
+            suspicion.append('high_rarity')
+        if int(class_id) > 218:
+            suspicion.append('unsupported_by_old_model')
+
+        ranked = sorted(
+            history,
+            key=lambda item: (
+                -int(item['track'][1] == class_id),
+                -float(item['track'][2]),
+                -_box_area(item['track']),
+            ),
+        )
+        representatives = []
+        seen_frames = set()
+        for item in ranked:
+            frame = item['frame']
+            if frame in seen_frames:
+                continue
+            representatives.append({
+                'frame': frame,
+                'captured_at': item.get('captured_at'),
+                'image_path': item['image_path'],
+                'box': _track_box(item['track']),
+            })
+            seen_frames.add(frame)
+            if len(representatives) >= REPRESENTATIVE_LIMIT:
+                break
+
+        best = ranked[0]
+        metadata = {
+            'track_id': track_id,
+            'phase': best.get('phase'),
+            'class_counts': dict(class_counts),
+            'min_confidence': round(lowest_confidence, 4),
+            'class_flips': flips,
+        }
+        return {
+            'id': f'bean:{round_id}:{track_id}',
+            'source_kind': 'bean',
+            'round_id': round_id,
+            'track_key': str(track_id),
+            'old_class_id': class_id,
+            'old_label': row.get('label'),
+            'old_name': row.get('name'),
+            'rarity': row.get('rarity'),
+            'confidence': float(best['track'][2]),
+            'first_frame': min(item['frame'] for item in history),
+            'last_frame': max(item['frame'] for item in history),
+            'frame_count': len(history),
+            'image_path': str(Path(best['image_path']).resolve()),
+            'box_json': _json(_track_box(best['track'])),
+            'representatives_json': _json(representatives),
+            'suspicion': suspicion,
+            'needs_review': 1,
+            'metadata_json': _json(metadata),
+        }
+
+    def _scan_bean(self) -> tuple[list[dict], int]:
+        events = []
+        rounds = list(_iter_directories(self.paths.bean_capture))
+        for folder in rounds:
+            history_by_track: dict[int, list[dict]] = defaultdict(list)
+            for row in _iter_frames(folder / 'frames.jsonl'):
+                image_path = folder / 'raw' / f"{row.get('frame')}.jpg"
+                if not image_path.is_file():
+                    continue
+                for track in row.get('tracks') or []:
+                    if not isinstance(track, (list, tuple)) or len(track) < 8:
+                        continue
+                    history_by_track[int(track[0])].append({
+                        'frame': str(row.get('frame')),
+                        'captured_at': row.get('captured_at'),
+                        'phase': row.get('phase'),
+                        'image_path': str(image_path),
+                        'track': track,
+                    })
+            for track_id, history in history_by_track.items():
+                if history:
+                    events.append(self._event_from_track(
+                        round_id=folder.name,
+                        track_id=track_id,
+                        history=history,
+                    ))
+        return events, len(rounds)
+
+    def _scan_boss(self) -> tuple[list[dict], int]:
+        events = []
+        rounds = list(_iter_directories(self.paths.boss_capture))
+        for folder in rounds:
+            meta = _read_json(folder / 'meta.json', {}) or {}
+            entries = meta.get('entries') or []
+            by_index = {
+                int(entry.get('index')): entry
+                for entry in entries
+                if entry.get('index') is not None
+            }
+            for index in range(1, 4):
+                image_path = folder / f'candidate_{index}.jpg'
+                if not image_path.is_file():
+                    continue
+                entry = by_index.get(index, {})
+                class_id = entry.get('old_class_id')
+                class_id = int(class_id) if class_id is not None else None
+                row = self._row_for(class_id)
+                suspicion = []
+                if not row:
+                    suspicion.append('unknown_identity')
+                elif row.get('rarity') in HIGH_RARITIES:
+                    suspicion.append('high_rarity')
+                event = {
+                    'id': f'boss:{folder.name}:{index}',
+                    'source_kind': 'boss',
+                    'round_id': folder.name,
+                    'track_key': str(index),
+                    'old_class_id': class_id,
+                    'old_label': row.get('label'),
+                    'old_name': entry.get('old_name') or row.get('name'),
+                    'rarity': row.get('rarity'),
+                    'confidence': None,
+                    'first_frame': f'candidate_{index}',
+                    'last_frame': f'candidate_{index}',
+                    'frame_count': 1,
+                    'image_path': str(image_path.resolve()),
+                    'box_json': None,
+                    'representatives_json': _json([{
+                        'frame': f'candidate_{index}',
+                        'image_path': str(image_path.resolve()),
+                        'box': None,
+                    }]),
+                    'suspicion': suspicion,
+                    'needs_review': 1,
+                    'metadata_json': _json({
+                        'candidate_index': index,
+                        'old_score': entry.get('old_score'),
+                        'old_raw': entry.get('old_raw'),
+                        'round_status': meta.get('status'),
+                    }),
+                }
+                events.append(event)
+        return events, len(rounds)
+
+    def _upsert_event(self, event: dict, updated_at: str) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO events (
+                id, source_kind, round_id, track_key, old_class_id, old_label,
+                old_name, rarity, confidence, first_frame, last_frame, frame_count,
+                image_path, box_json, representatives_json, suspicion, needs_review,
+                status, reviewed_class_id, reviewed_label, review_note, reviewed_at,
+                metadata_json, updated_at
+            ) VALUES (
+                :id, :source_kind, :round_id, :track_key, :old_class_id, :old_label,
+                :old_name, :rarity, :confidence, :first_frame, :last_frame, :frame_count,
+                :image_path, :box_json, :representatives_json,
+                :suspicion_json, :needs_review, :status,
+                :reviewed_class_id, :reviewed_label, :review_note, :reviewed_at,
+                :metadata_json, :updated_at
+            )
+            ON CONFLICT(id) DO UPDATE SET
+                source_kind=excluded.source_kind,
+                round_id=excluded.round_id,
+                track_key=excluded.track_key,
+                old_class_id=excluded.old_class_id,
+                old_label=excluded.old_label,
+                old_name=excluded.old_name,
+                rarity=excluded.rarity,
+                confidence=excluded.confidence,
+                first_frame=excluded.first_frame,
+                last_frame=excluded.last_frame,
+                frame_count=excluded.frame_count,
+                image_path=excluded.image_path,
+                box_json=excluded.box_json,
+                representatives_json=excluded.representatives_json,
+                suspicion=excluded.suspicion,
+                needs_review=excluded.needs_review,
+                metadata_json=excluded.metadata_json,
+                updated_at=excluded.updated_at
+            """,
+            {
+                **event,
+                'suspicion_json': _json(event['suspicion']),
+                'updated_at': updated_at,
+                'status': event.get('status', 'pending'),
+                'reviewed_class_id': event.get('reviewed_class_id'),
+                'reviewed_label': event.get('reviewed_label'),
+                'review_note': event.get('review_note'),
+                'reviewed_at': event.get('reviewed_at'),
+            },
+        )
+
+    def summary(self) -> dict:
+        status = {
+            row['status']: row['count']
+            for row in self.connection.execute(
+                'SELECT status, COUNT(*) AS count FROM events GROUP BY status'
+            )
+        }
+        rarity = {
+            row['rarity'] or 'UNKNOWN': row['count']
+            for row in self.connection.execute(
+                'SELECT rarity, COUNT(*) AS count FROM events GROUP BY rarity'
+            )
+        }
+        sources = {
+            row['source_kind']: row['count']
+            for row in self.connection.execute(
+                'SELECT source_kind, COUNT(*) AS count FROM events GROUP BY source_kind'
+            )
+        }
+        pending_high = self.connection.execute(
+            "SELECT COUNT(*) FROM events "
+            "WHERE status = 'pending' AND rarity IN ('SSR', 'SP', 'UR')"
+        ).fetchone()[0]
+        scanned = self.connection.execute(
+            'SELECT scanned_at FROM scan_runs ORDER BY id DESC LIMIT 1'
+        ).fetchone()
+        rounds = {
+            row['source_kind']: row['count']
+            for row in self.connection.execute(
+                'SELECT source_kind, COUNT(DISTINCT round_id) AS count '
+                'FROM events GROUP BY source_kind'
+            )
+        }
+        return {
+            'events': sum(status.values()),
+            'status': status,
+            'rarity': rarity,
+            'sources': sources,
+            'rounds': rounds,
+            'pending_high_rarity': pending_high,
+            'last_scan': scanned['scanned_at'] if scanned else None,
+            'database': str(self.paths.database),
+            'bean_capture': str(self.paths.bean_capture),
+            'boss_capture': str(self.paths.boss_capture),
+        }
+
+    @staticmethod
+    def _event_payload(row: sqlite3.Row) -> dict:
+        payload = dict(row)
+        decoders = {
+            'box_json': ('box', None),
+            'representatives_json': ('representatives', []),
+            'metadata_json': ('metadata', {}),
+        }
+        for key, (target, fallback) in decoders.items():
+            raw = payload.pop(key, None)
+            try:
+                payload[target] = json.loads(raw) if raw else fallback
+            except json.JSONDecodeError:
+                payload[target] = fallback
+        try:
+            payload['suspicion'] = json.loads(payload.get('suspicion') or '[]')
+        except json.JSONDecodeError:
+            payload['suspicion'] = []
+        payload['needs_review'] = bool(payload.get('needs_review'))
+        payload['image_url'] = f"/api/events/{payload['id']}/image/0"
+        return payload
+
+    def list_events(
+        self,
+        *,
+        status: str | None = None,
+        source: str | None = None,
+        rarity: str | None = None,
+        pending_high_only: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict:
+        clauses = []
+        values: list[Any] = []
+        if status:
+            clauses.append('status = ?')
+            values.append(status)
+        if source:
+            clauses.append('source_kind = ?')
+            values.append(source)
+        if rarity:
+            clauses.append('rarity = ?')
+            values.append(rarity)
+        if pending_high_only:
+            clauses.append("status = 'pending' AND rarity IN ('SSR', 'SP', 'UR')")
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ''
+        total = self.connection.execute(
+            f'SELECT COUNT(*) FROM events {where}', values
+        ).fetchone()[0]
+        rows = self.connection.execute(
+            f'SELECT * FROM events {where} '
+            "ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, "
+            "CASE rarity WHEN 'UR' THEN 0 WHEN 'SP' THEN 1 WHEN 'SSR' THEN 2 ELSE 3 END, "
+            'updated_at DESC LIMIT ? OFFSET ?',
+            [*values, max(1, min(int(limit), 500)), max(0, int(offset))],
+        ).fetchall()
+        return {
+            'total': total,
+            'limit': limit,
+            'offset': offset,
+            'items': [self._event_payload(row) for row in rows],
+        }
+
+    def get_event(self, event_id: str) -> dict | None:
+        row = self.connection.execute(
+            'SELECT * FROM events WHERE id = ?', (event_id,)
+        ).fetchone()
+        return self._event_payload(row) if row else None

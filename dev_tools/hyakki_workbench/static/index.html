@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>百鬼夜行训练工作台</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">HYAKKI YAKOU · LOCAL PIPELINE</p>
+      <h1>百鬼夜行训练工作台</h1>
+    </div>
+    <div class="top-actions">
+      <span id="scan-state" class="status-chip">尚未扫描</span>
+      <button id="scan-button" class="button primary">扫描采集数据</button>
+    </div>
+  </header>
+
+  <nav class="steps" aria-label="流程">
+    <button class="step active" data-page="overview"><b>01</b><span>总览</span></button>
+    <button class="step" data-page="capture"><b>02</b><span>采集</span></button>
+    <button class="step" data-page="review"><b>03</b><span>审核</span></button>
+    <button class="step" data-page="dataset"><b>04</b><span>数据集</span></button>
+    <button class="step" data-page="training"><b>05</b><span>训练与评估</span></button>
+    <button class="step" data-page="deploy"><b>06</b><span>上线与回退</span></button>
+  </nav>
+
+  <main>
+    <section id="page-overview" class="page active">
+      <div class="hero">
+        <div>
+          <p class="eyebrow">NEXT ACTION</p>
+          <h2 id="next-title">先扫描现有采集数据</h2>
+          <p id="next-detail">把撒豆轨迹和鬼王候选整理成可审核的目标出现事件。</p>
+        </div>
+        <button id="next-action" class="button">开始扫描</button>
+      </div>
+
+      <div class="metrics">
+        <article><span>总事件</span><strong id="metric-events">—</strong></article>
+        <article><span>高稀有度待审核</span><strong id="metric-high">—</strong></article>
+        <article><span>撒豆局数</span><strong id="metric-bean">—</strong></article>
+        <article><span>鬼王局数</span><strong id="metric-boss">—</strong></article>
+      </div>
+
+      <div class="grid two">
+        <article class="panel">
+          <div class="panel-title">
+            <h3>审核队列</h3>
+            <button id="refresh-events" class="text-button">刷新</button>
+          </div>
+          <div id="event-list" class="event-list empty">扫描后显示 SSR / SP / UR 和可疑事件。</div>
+        </article>
+        <article class="panel">
+          <h3>采集目录</h3>
+          <dl class="paths">
+            <dt>撒豆</dt><dd id="path-bean">—</dd>
+            <dt>鬼王</dt><dd id="path-boss">—</dd>
+            <dt>本地状态</dt><dd id="path-state">—</dd>
+          </dl>
+          <p class="hint">工作台只监听 OAS 已生成的采集文件，不启动或控制游戏任务。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="page-capture" class="page">
+      <article class="panel placeholder">
+        <p class="eyebrow">CAPTURE</p>
+        <h2>采集页</h2>
+        <p>下一步会加入局数、磁盘占用、保留期限和重复帧统计。</p>
+      </article>
+    </section>
+    <section id="page-review" class="page">
+      <article class="panel placeholder">
+        <p class="eyebrow">REVIEW</p>
+        <h2>审核页</h2>
+        <p>按一次目标出现审核代表帧，正确、改类别、未知或送入 X-AnyLabeling。</p>
+      </article>
+    </section>
+    <section id="page-dataset" class="page">
+      <article class="panel placeholder">
+        <p class="eyebrow">DATASET</p>
+        <h2>数据集页</h2>
+        <p>将人工真值、弱标签和负样本按局拆成不可变 train / val / test 版本。</p>
+      </article>
+    </section>
+    <section id="page-training" class="page">
+      <article class="panel placeholder">
+        <p class="eyebrow">TRAIN &amp; EVALUATE</p>
+        <h2>训练与评估页</h2>
+        <p>单 GPU 队列、YOLO11 参数、实时曲线、阈值校准和最终测试。</p>
+      </article>
+    </section>
+    <section id="page-deploy" class="page">
+      <article class="panel placeholder">
+        <p class="eyebrow">DEPLOY</p>
+        <h2>上线与回退页</h2>
+        <p>旧模型、旁路、补充、新模型优先四种模式及快速回退。</p>
+      </article>
+    </section>
+  </main>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

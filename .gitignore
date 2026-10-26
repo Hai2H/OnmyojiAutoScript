@@ -275,3 +275,9 @@ oas.bat
 
 # Per-instance FrogBoss prediction and result history
 data/frog_oas/
+
+# Hyakki workbench runtime state and generated artifacts
+data/hyakki_workbench/
+runs/hyakki_workbench/
+log/workbench/
+weights/hyakkiyakou/
