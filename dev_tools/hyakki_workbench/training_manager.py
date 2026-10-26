@@ -153,6 +153,7 @@ class TrainingManager:
         imgsz: int = 960,
         batch: int = 4,
         patience: int = 20,
+        workers: int = 0,
     ) -> dict:
         if model not in {'yolo11n.pt', 'yolo11s.pt'}:
             raise ValueError('V1 只允许 yolo11n.pt 或 yolo11s.pt')
@@ -162,6 +163,8 @@ class TrainingManager:
             raise ValueError('imgsz 必须在 320～1280')
         if not 1 <= int(batch) <= 32:
             raise ValueError('batch 必须在 1～32')
+        if not 0 <= int(workers) <= 8:
+            raise ValueError('workers 必须在 0～8')
         python = self.paths.train_python
         if not python.is_file():
             raise ValueError(f'训练环境不存在：{python}')
@@ -189,6 +192,7 @@ class TrainingManager:
                     'imgsz': int(imgsz),
                     'batch': int(batch),
                     'patience': int(patience),
+                    'workers': int(workers),
                     'device': '0',
                     'amp': True,
                 }
@@ -226,6 +230,7 @@ class TrainingManager:
                 '--imgsz', str(imgsz),
                 '--batch', str(batch),
                 '--patience', str(patience),
+                '--workers', str(workers),
             ]
             self._launch(job_id, command, run_dir)
         return self.get_job(job_id)

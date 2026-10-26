@@ -44,6 +44,7 @@ class TrainingStartRequest(BaseModel):
     imgsz: int = 960
     batch: int = 4
     patience: int = 20
+    workers: int = 0
 
 
 class TrainingTestRequest(BaseModel):
@@ -347,6 +348,7 @@ def create_app(paths: WorkspacePaths | None = None) -> FastAPI:
                 imgsz=request.imgsz,
                 batch=request.batch,
                 patience=request.patience,
+                workers=request.workers,
             )
         except ValueError as exception:
             raise HTTPException(status_code=422, detail=str(exception)) from exception

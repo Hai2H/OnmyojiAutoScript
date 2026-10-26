@@ -206,24 +206,50 @@ def run_train(args) -> dict:
     root = Path(args.data).resolve().parent
     run_dir = Path(args.run_dir).resolve()
     project = run_dir.parent
-    model = YOLO(args.model)
-    results = model.train(
-        data=args.data,
-        epochs=args.epochs,
-        imgsz=args.imgsz,
-        batch=args.batch,
-        device=0,
-        amp=True,
-        pretrained=True,
-        project=str(project),
-        name=run_dir.name,
-        exist_ok=True,
-        patience=args.patience,
-        workers=4,
-        seed=0,
-        deterministic=True,
-        plots=True,
-    )
+    workers_used = int(args.workers)
+    fallback_used = False
+
+    def start_training(workers: int, resume: bool = False):
+        if resume:
+            resume_model = YOLO(run_dir / 'weights' / 'last.pt')
+            return resume_model, resume_model.train(resume=True, workers=workers)
+        train_model = YOLO(args.model)
+        train_result = train_model.train(
+            data=args.data,
+            epochs=args.epochs,
+            imgsz=args.imgsz,
+            batch=args.batch,
+            device=0,
+            amp=True,
+            pretrained=True,
+            project=str(project),
+            name=run_dir.name,
+            exist_ok=True,
+            patience=args.patience,
+            workers=workers,
+            seed=0,
+            deterministic=True,
+            plots=True,
+        )
+        return train_model, train_result
+
+    try:
+        model, results = start_training(workers_used)
+    except RuntimeError as exception:
+        if workers_used == 0 or 'DataLoader worker' not in str(exception):
+            raise
+        print(
+            'Windows DataLoader worker failed; retrying with workers=0: '
+            f'{exception}',
+            flush=True,
+        )
+        workers_used = 0
+        fallback_used = True
+        last_weight = run_dir / 'weights' / 'last.pt'
+        try:
+            model, results = start_training(0, resume=last_weight.is_file())
+        except Exception:
+            model, results = start_training(0, resume=False)
     best = Path(model.trainer.best).resolve()
     metrics = {str(key): float(value) if isinstance(value, (int, float)) else value
                for key, value in (results.results_dict or {}).items()}
@@ -240,6 +266,8 @@ def run_train(args) -> dict:
         'ok': True,
         'best_weight': str(best),
         'metrics': metrics,
+        'workers_used': workers_used,
+        'workers_fallback': fallback_used,
         'val': val,
         'thresholds': thresholds,
         'thresholds_path': str(thresholds_path),
@@ -292,6 +320,7 @@ def main() -> int:
     train.add_argument('--imgsz', type=int, default=960)
     train.add_argument('--batch', type=int, default=4)
     train.add_argument('--patience', type=int, default=20)
+    train.add_argument('--workers', type=int, default=0)
     test = sub.add_parser('test')
     test.add_argument('--job-id', required=True)
     test.add_argument('--data', required=True)

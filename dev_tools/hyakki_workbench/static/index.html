@@ -362,6 +362,7 @@
             <label>epochs<input id="train-epochs" type="number" value="100" min="1" max="500"></label>
             <label>batch<input id="train-batch" type="number" value="4" min="1" max="32"></label>
             <label>patience<input id="train-patience" type="number" value="20" min="1" max="200"></label>
+            <label>DataLoader workers<input id="train-workers" type="number" value="0" min="0" max="8" title="Windows 建议 0，避免共享内存错误"></label>
           </div>
           <button id="start-training" class="button primary">开始训练</button>
           <p class="hint">训练环境：.venv-train · GPU 0 · FP16 · 单任务队列</p>

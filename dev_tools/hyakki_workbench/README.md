@@ -70,6 +70,10 @@ data/hyakki_workbench/
 10. 在“上线与回退”页发布模型、启动 GPU 推理服务并选择运行模式。
 11. OAS 的 `Auto` 模式跟随工作台设置；新服务异常时当前帧继续使用旧模型。
 
+Windows 训练默认 `DataLoader workers=0`。如果手动调到大于 0 后遇到
+`DataLoader worker exited unexpectedly` 或共享文件映射错误 `1455`，工作台会自动降级到
+`workers=0`；也可以新建任务并保持 workers 为 0。
+
 盲扫默认只显示“待处理”帧。已确认无需补框、需要补框和已标注的帧不会重新进入默认队列，但可从对应筛选或“全部帧”重新查看。
 
 键盘快捷键：

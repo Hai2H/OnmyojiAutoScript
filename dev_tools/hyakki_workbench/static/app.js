@@ -1136,6 +1136,7 @@ $('#start-training').addEventListener('click', async () => {
         imgsz: Number($('#train-imgsz').value),
         batch: Number($('#train-batch').value),
         patience: Number($('#train-patience').value),
+        workers: Number($('#train-workers').value),
       }),
     });
     state.currentJob = job;
