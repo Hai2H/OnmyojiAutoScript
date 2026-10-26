@@ -13,6 +13,12 @@ const state = {
   currentJob: null,
   trainingPoll: null,
   deployment: null,
+  scanFilter: 'all',
+  scanRound: '',
+  scanOffset: 0,
+  scanLimit: 48,
+  scanCurrent: null,
+  scanPackage: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -213,6 +219,166 @@ async function loadCapturePage() {
   }
 }
 
+const scanStatusLabels = {
+  unreviewed: '未处理',
+  candidate: '疑似新式神',
+  not_new: '不是新式神',
+  skipped: '已跳过',
+  annotated: '已标注',
+};
+
+async function loadScanRounds() {
+  const payload = await api('/api/raw-frames/rounds');
+  const current = $('#scan-round').value;
+  $('#scan-round').innerHTML = '<option value="">全部局</option>' + (payload.items || []).map((item) => `
+    <option value="${escapeHtml(item.round_id)}">${escapeHtml(item.round_id)} · ${item.frames} 帧 · 空检测 ${item.empty_frames}</option>
+  `).join('');
+  if (current && [...$('#scan-round').options].some((option) => option.value === current)) {
+    $('#scan-round').value = current;
+  }
+}
+
+function renderScanGallery(payload) {
+  const grid = $('#scan-grid');
+  $('#scan-total').textContent = `${payload.total || 0} 帧`;
+  const page = Math.floor((payload.offset || 0) / state.scanLimit) + 1;
+  const pages = Math.max(1, Math.ceil((payload.total || 0) / state.scanLimit));
+  $('#scan-page').textContent = `第 ${page} / ${pages} 页`;
+  $('#scan-prev').disabled = state.scanOffset <= 0;
+  $('#scan-next').disabled = state.scanOffset + state.scanLimit >= (payload.total || 0);
+  if (!payload.items?.length) {
+    grid.className = 'scan-grid empty';
+    grid.textContent = '当前筛选下没有原始帧';
+    return;
+  }
+  grid.className = 'scan-grid';
+  grid.innerHTML = payload.items.map((frame) => {
+    const active = state.scanCurrent?.id === frame.id ? ' active' : '';
+    const status = frame.review_status || 'unreviewed';
+    const suspicionCount = (frame.suspicion || []).length;
+    return `
+      <button class="scan-card${active}" data-frame-id="${escapeHtml(frame.id)}">
+        <img src="${escapeHtml(frame.image_url)}" loading="lazy" alt="">
+        <span class="scan-card-status ${escapeHtml(status)}">${escapeHtml(scanStatusLabels[status] || status)}</span>
+        ${suspicionCount ? `<span class="scan-card-suspect">${suspicionCount} 个疑点</span>` : ''}
+      </button>`;
+  }).join('');
+}
+
+async function loadScanFrames() {
+  const params = new URLSearchParams({
+    filter: state.scanFilter,
+    limit: String(state.scanLimit),
+    offset: String(state.scanOffset),
+  });
+  if (state.scanRound) params.set('round_id', state.scanRound);
+  try {
+    renderScanGallery(await api(`/api/raw-frames?${params}`));
+  } catch (error) {
+    toast(`读取原始帧失败：${error.message}`);
+  }
+}
+
+function clearScanSelection() {
+  state.scanCurrent = null;
+  state.scanPackage = null;
+  $('#scan-empty').hidden = false;
+  $('#scan-content').hidden = true;
+  $('#scan-image').removeAttribute('src');
+  $('#scan-boxes').innerHTML = '';
+}
+
+function renderScanBoxes() {
+  if (!state.scanCurrent) return;
+  const image = $('#scan-image');
+  const container = $('#scan-boxes');
+  const shell = image.parentElement;
+  if (!image.naturalWidth || !image.naturalHeight) {
+    container.innerHTML = '';
+    return;
+  }
+  const imageRect = image.getBoundingClientRect();
+  const shellRect = shell.getBoundingClientRect();
+  const widthRatio = imageRect.width / image.naturalWidth;
+  const heightRatio = imageRect.height / image.naturalHeight;
+  const shapes = [
+    ...(state.scanCurrent.tracks || []).map((item) => ({
+      box: item.box,
+      label: item.name || item.label || '旧模型',
+      manual: false,
+    })),
+    ...(state.scanCurrent.manual_shapes || []).map((item) => ({
+      box: item.box,
+      label: item.label,
+      manual: true,
+    })),
+  ];
+  container.innerHTML = shapes.map((item) => {
+    const box = item.box;
+    if (!box) return '';
+    const left = imageRect.left - shellRect.left + box.x1 * widthRatio;
+    const top = imageRect.top - shellRect.top + box.y1 * heightRatio;
+    const width = (box.x2 - box.x1) * widthRatio;
+    const height = (box.y2 - box.y1) * heightRatio;
+    return `<span class="scan-box ${item.manual ? 'manual' : ''}" style="left:${left}px;top:${top}px;width:${width}px;height:${height}px"><span>${escapeHtml(item.label)}</span></span>`;
+  }).join('');
+}
+
+function renderScanDetail(frame) {
+  state.scanCurrent = frame;
+  state.scanPackage = null;
+  $('#scan-empty').hidden = true;
+  $('#scan-content').hidden = false;
+  $('#scan-round-label').textContent = frame.round_id;
+  $('#scan-frame-label').textContent = frame.frame_key;
+  $('#scan-track-count').textContent = frame.track_count;
+  $('#scan-status-label').textContent = scanStatusLabels[frame.review_status] || frame.review_status;
+  $('#scan-note').value = frame.note || '';
+  $('#scan-tags').innerHTML = (frame.suspicion || [])
+    .map((item) => `<span class="tag">${escapeHtml(suspicionLabels[item] || item)}</span>`).join('');
+  $('#scan-package').textContent = '尚未生成标注目录';
+  $('#scan-open-folder').disabled = true;
+  const shapes = frame.manual_shapes || [];
+  $('#scan-manual-shapes').innerHTML = shapes.length
+    ? shapes.map((shape) => `<span class="manual-shape">${escapeHtml(shape.label)}</span>`).join('')
+    : '尚无人工框';
+  $('#scan-image').src = frame.image_url;
+}
+
+async function selectScanFrame(frameId) {
+  try {
+    const frame = await api(`/api/raw-frames/${encodeURIComponent(frameId)}`);
+    renderScanDetail(frame);
+    $$('.scan-card').forEach((card) => card.classList.toggle('active', card.dataset.frameId === frameId));
+  } catch (error) {
+    toast(`读取原始帧失败：${error.message}`);
+  }
+}
+
+async function markScanFrame(action) {
+  if (!state.scanCurrent) return;
+  try {
+    const frame = await api(`/api/raw-frames/${encodeURIComponent(state.scanCurrent.id)}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ action, note: $('#scan-note').value }),
+    });
+    renderScanDetail(frame);
+    await loadScanFrames();
+    toast(`已标记为：${scanStatusLabels[frame.review_status]}`);
+  } catch (error) {
+    toast(`保存盲扫状态失败：${error.message}`);
+  }
+}
+
+async function loadScanPage() {
+  try {
+    await loadScanRounds();
+    await loadScanFrames();
+  } catch (error) {
+    toast(`读取盲扫页失败：${error.message}`);
+  }
+}
+
 function reviewQuery(filter) {
   if (filter === 'high') return '/api/events?rarity=UR,SP,SSR&limit=200';
   if (filter === 'pending') return '/api/events?status=pending,needs_label&limit=200';
@@ -271,6 +437,7 @@ const suspicionLabels = {
   high_rarity: '高稀有度',
   unsupported_by_old_model: '旧模型类别表不支持',
   unknown_identity: '旧模型未识别身份',
+  empty_detection: '旧模型没有检测到目标',
 };
 
 function updateReviewBox() {
@@ -420,7 +587,7 @@ function updateDatasetSelection() {
 
 function renderDatasetReadiness(readiness) {
   state.datasetReadiness = readiness;
-  $('#dataset-reviewed').textContent = readiness.reviewed_events ?? 0;
+  $('#dataset-reviewed').textContent = (readiness.reviewed_events ?? 0) + (readiness.manual_frames ?? 0);
   $('#dataset-groups').textContent = readiness.round_groups ?? 0;
   $('#dataset-eligible').textContent = readiness.default_classes?.length ?? 0;
   $('#dataset-warnings').innerHTML = (readiness.warnings || [])
@@ -697,6 +864,7 @@ $$('.step').forEach((button) => {
     switchPage(button.dataset.page);
     if (button.dataset.page === 'review') loadReviewQueue(true);
     if (button.dataset.page === 'capture') loadCapturePage();
+    if (button.dataset.page === 'scan') loadScanPage();
     if (button.dataset.page === 'dataset') loadDatasetPage();
     if (button.dataset.page === 'training') loadTrainingPage();
     if (button.dataset.page === 'deploy') loadDeploymentPage();
@@ -886,6 +1054,81 @@ $('#cancel-job').addEventListener('click', async () => {
 });
 $('#refresh-deployment').addEventListener('click', loadDeploymentPage);
 $('#refresh-capture').addEventListener('click', loadCapturePage);
+$('#scan-filters').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-scan-filter]');
+  if (!button) return;
+  state.scanFilter = button.dataset.scanFilter;
+  state.scanOffset = 0;
+  $$('#scan-filters button').forEach((item) => item.classList.toggle('active', item === button));
+  loadScanFrames();
+});
+$('#scan-round').addEventListener('change', (event) => {
+  state.scanRound = event.target.value;
+  state.scanOffset = 0;
+  loadScanFrames();
+});
+$('#scan-grid').addEventListener('click', (event) => {
+  const card = event.target.closest('[data-frame-id]');
+  if (card) selectScanFrame(card.dataset.frameId);
+});
+$('#scan-prev').addEventListener('click', () => {
+  state.scanOffset = Math.max(0, state.scanOffset - state.scanLimit);
+  loadScanFrames();
+});
+$('#scan-next').addEventListener('click', () => {
+  state.scanOffset += state.scanLimit;
+  loadScanFrames();
+});
+$('#scan-candidate').addEventListener('click', () => markScanFrame('candidate'));
+$('#scan-not-new').addEventListener('click', () => markScanFrame('not_new'));
+$('#scan-reset').addEventListener('click', () => markScanFrame('reset'));
+$('#scan-prepare').addEventListener('click', async () => {
+  if (!state.scanCurrent) return;
+  try {
+    const packageInfo = await api(`/api/raw-frames/${encodeURIComponent(state.scanCurrent.id)}/prepare-label`, {
+      method: 'POST',
+    });
+    state.scanPackage = packageInfo;
+    $('#scan-package').textContent = packageInfo.folder;
+    $('#scan-open-folder').disabled = false;
+    toast('标注目录已生成。');
+  } catch (error) {
+    toast(`生成失败：${error.message}`);
+  }
+});
+$('#scan-open-folder').addEventListener('click', async () => {
+  if (!state.scanCurrent) return;
+  try {
+    await api(`/api/raw-frames/${encodeURIComponent(state.scanCurrent.id)}/open-label-folder`, {
+      method: 'POST',
+    });
+    toast('已在文件资源管理器中打开标注目录。');
+  } catch (error) {
+    toast(`打开目录失败：${error.message}`);
+  }
+});
+$('#scan-launch-xany').addEventListener('click', async () => {
+  try {
+    await api('/api/xany/launch', { method: 'POST' });
+    toast('已启动 X-AnyLabeling。请选择刚才打开的标注目录。');
+  } catch (error) {
+    toast(`启动失败：${error.message}`);
+  }
+});
+$('#scan-import').addEventListener('click', async () => {
+  if (!state.scanCurrent) return;
+  try {
+    const result = await api(`/api/raw-frames/${encodeURIComponent(state.scanCurrent.id)}/import-label`, {
+      method: 'POST',
+    });
+    renderScanDetail(result.frame);
+    toast(`已导入 ${result.imported} 个人工框。`);
+  } catch (error) {
+    toast(`导入失败：${error.message}`);
+  }
+});
+$('#scan-image').addEventListener('load', renderScanBoxes);
+window.addEventListener('resize', renderScanBoxes);
 $('#model-versions').addEventListener('click', async (event) => {
   const button = event.target.closest('[data-activate-model]');
   if (!button) return;

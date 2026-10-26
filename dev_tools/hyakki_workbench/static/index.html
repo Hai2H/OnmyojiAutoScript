@@ -21,10 +21,11 @@
   <nav class="steps" aria-label="流程">
     <button class="step active" data-page="overview"><b>01</b><span>总览</span></button>
     <button class="step" data-page="capture"><b>02</b><span>采集</span></button>
-    <button class="step" data-page="review"><b>03</b><span>审核</span></button>
-    <button class="step" data-page="dataset"><b>04</b><span>数据集</span></button>
-    <button class="step" data-page="training"><b>05</b><span>训练与评估</span></button>
-    <button class="step" data-page="deploy"><b>06</b><span>上线与回退</span></button>
+    <button class="step" data-page="scan"><b>03</b><span>原始帧盲扫</span></button>
+    <button class="step" data-page="review"><b>04</b><span>事件审核</span></button>
+    <button class="step" data-page="dataset"><b>05</b><span>数据集</span></button>
+    <button class="step" data-page="training"><b>06</b><span>训练与评估</span></button>
+    <button class="step" data-page="deploy"><b>07</b><span>上线与回退</span></button>
   </nav>
 
   <main>
@@ -90,6 +91,75 @@
           <h3>鬼王候选</h3>
           <div id="capture-boss-list" class="capture-list empty">正在读取…</div>
         </article>
+      </div>
+    </section>
+    <section id="page-scan" class="page">
+      <div class="review-header">
+        <div>
+          <p class="eyebrow">RAW FRAME DISCOVERY</p>
+          <h2>原始帧盲扫</h2>
+          <p class="hint">旧模型完全漏检的新式神不会进入事件队列，必须从整帧截图中发现。发现后生成标注目录，画框并选择真实类别。</p>
+        </div>
+        <select id="scan-round" class="plain-select"><option value="">全部局</option></select>
+      </div>
+      <div class="scan-toolbar">
+        <div class="segmented" id="scan-filters">
+          <button class="active" data-scan-filter="all">全部帧</button>
+          <button data-scan-filter="suspect">可疑帧</button>
+          <button data-scan-filter="empty">空检测</button>
+          <button data-scan-filter="low">低置信</button>
+          <button data-scan-filter="flip">类别跳变</button>
+          <button data-scan-filter="candidate">疑似新式神</button>
+          <button data-scan-filter="annotated">已标注</button>
+        </div>
+        <span id="scan-total" class="status-chip">0 帧</span>
+      </div>
+      <div class="scan-layout">
+        <article class="panel scan-gallery-panel">
+          <div id="scan-grid" class="scan-grid empty">扫描采集数据后显示缩略图</div>
+          <div class="pager">
+            <button id="scan-prev" class="button">上一页</button>
+            <span id="scan-page" class="muted small">第 1 页</span>
+            <button id="scan-next" class="button">下一页</button>
+          </div>
+        </article>
+        <aside class="panel scan-detail">
+          <div id="scan-empty" class="empty-stage">
+            <strong>选择一张原始帧</strong>
+            <span>检查旧模型漏检、错识别和全部空检测画面。</span>
+          </div>
+          <div id="scan-content" class="scan-content" hidden>
+            <div class="image-shell scan-image-shell">
+              <img id="scan-image" alt="原始采集帧">
+              <div id="scan-boxes" class="scan-boxes"></div>
+            </div>
+            <div class="prediction-row">
+              <div><span>局</span><strong id="scan-round-label">—</strong></div>
+              <div><span>帧</span><strong id="scan-frame-label">—</strong></div>
+              <div><span>旧模型目标</span><strong id="scan-track-count">—</strong></div>
+              <div><span>状态</span><strong id="scan-status-label">—</strong></div>
+            </div>
+            <div id="scan-tags" class="tag-list"></div>
+            <div class="row">
+              <button id="scan-candidate" class="action-button warning">标记为疑似新式神</button>
+              <button id="scan-not-new" class="action-button">不是新式神</button>
+              <button id="scan-reset" class="text-button">恢复未处理</button>
+            </div>
+            <label for="scan-note" class="field-label">盲扫备注</label>
+            <textarea id="scan-note" rows="2" placeholder="例如：疑似新 SP、被旧模型误认成 SSR 等"></textarea>
+            <div class="label-package">
+              <h3>标注与回导</h3>
+              <div class="inline-actions">
+                <button id="scan-prepare" class="action-button primary">生成 X-AnyLabeling 目录</button>
+                <button id="scan-import" class="text-button">导入人工框</button>
+                <button id="scan-open-folder" class="text-button" disabled>打开标注目录</button>
+                <button id="scan-launch-xany" class="text-button">启动 X-AnyLabeling</button>
+              </div>
+              <p id="scan-package" class="path-output">尚未生成标注目录</p>
+              <div id="scan-manual-shapes" class="manual-shapes">尚无人工框</div>
+            </div>
+          </div>
+        </aside>
       </div>
     </section>
     <section id="page-review" class="page">
@@ -186,7 +256,7 @@
         <button id="refresh-dataset" class="button">刷新统计</button>
       </div>
       <div class="metrics dataset-metrics">
-        <article><span>已审核事件</span><strong id="dataset-reviewed">—</strong></article>
+        <article><span>已审核目标</span><strong id="dataset-reviewed">—</strong></article>
         <article><span>可拆分局组</span><strong id="dataset-groups">—</strong></article>
         <article><span>达标类别</span><strong id="dataset-eligible">—</strong></article>
         <article><span>历史版本</span><strong id="dataset-versions">—</strong></article>

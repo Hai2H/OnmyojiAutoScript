@@ -173,6 +173,42 @@ CREATE TABLE IF NOT EXISTS event_frame_labels (
 
 CREATE INDEX IF NOT EXISTS idx_frame_labels_event
     ON event_frame_labels(event_id);
+
+CREATE TABLE IF NOT EXISTS raw_frames (
+    id TEXT PRIMARY KEY,
+    round_id TEXT NOT NULL,
+    frame_key TEXT NOT NULL,
+    captured_at TEXT,
+    phase TEXT,
+    image_path TEXT NOT NULL,
+    tracks_json TEXT NOT NULL DEFAULT '[]',
+    track_count INTEGER NOT NULL DEFAULT 0,
+    min_confidence REAL,
+    image_width INTEGER,
+    image_height INTEGER,
+    suspicion TEXT NOT NULL DEFAULT '[]',
+    review_status TEXT NOT NULL DEFAULT 'unreviewed',
+    note TEXT,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_raw_frames_browse
+    ON raw_frames(review_status, round_id, frame_key);
+
+CREATE TABLE IF NOT EXISTS manual_shapes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    frame_id TEXT NOT NULL,
+    class_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    box_json TEXT NOT NULL,
+    source TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_manual_shapes_frame
+    ON manual_shapes(frame_id);
+CREATE INDEX IF NOT EXISTS idx_manual_shapes_class
+    ON manual_shapes(class_id);
 """
 
 
@@ -204,7 +240,7 @@ class Catalog:
 
     def scan(self) -> ScanResult:
         self._load_class_table()
-        bean_events, bean_rounds = self._scan_bean()
+        bean_events, bean_rounds, raw_frames = self._scan_bean()
         boss_events, boss_rounds = self._scan_boss()
         events = bean_events + boss_events
         now = _now()
@@ -231,6 +267,15 @@ class Catalog:
                 high_rarity += 1
             if event['suspicion']:
                 suspicious += 1
+        for frame in raw_frames:
+            existing = self.connection.execute(
+                'SELECT review_status, note FROM raw_frames WHERE id=?',
+                (frame['id'],),
+            ).fetchone()
+            if existing:
+                frame['review_status'] = existing['review_status']
+                frame['note'] = existing['note']
+            self._upsert_raw_frame(frame, now)
         result = ScanResult(
             bean_rounds=bean_rounds,
             boss_rounds=boss_rounds,
@@ -343,12 +388,63 @@ class Catalog:
             'metadata_json': _json(metadata),
         }
 
-    def _scan_bean(self) -> tuple[list[dict], int]:
+    def _scan_bean(self) -> tuple[list[dict], int, list[dict]]:
         events = []
+        raw_frames = []
         rounds = list(_iter_directories(self.paths.bean_capture))
         for folder in rounds:
+            rows = list(_iter_frames(folder / 'frames.jsonl'))
+            flipped_tracks = set()
+            last_class = {}
+            for row in rows:
+                for track in row.get('tracks') or []:
+                    if not isinstance(track, (list, tuple)) or len(track) < 8:
+                        continue
+                    track_id = int(track[0])
+                    class_id = int(track[1])
+                    if track_id in last_class and last_class[track_id] != class_id:
+                        flipped_tracks.add(track_id)
+                    last_class[track_id] = class_id
+            for row in rows:
+                image_path = folder / 'raw' / f"{row.get('frame')}.jpg"
+                if not image_path.is_file():
+                    continue
+                valid_tracks = [
+                    track for track in (row.get('tracks') or [])
+                    if isinstance(track, (list, tuple)) and len(track) >= 8
+                ]
+                suggestions = []
+                if not valid_tracks:
+                    suggestions.append('empty_detection')
+                if any(float(track[2]) < LOW_CONFIDENCE for track in valid_tracks):
+                    suggestions.append('low_confidence')
+                if any(int(track[0]) in flipped_tracks for track in valid_tracks):
+                    suggestions.append('class_flip')
+                if any(self._row_for(int(track[1])).get('rarity') in HIGH_RARITIES
+                       for track in valid_tracks):
+                    suggestions.append('high_rarity')
+                frame_key = str(row.get('frame'))
+                try:
+                    from PIL import Image
+
+                    with Image.open(image_path) as image:
+                        image_width, image_height = image.size
+                except Exception:
+                    image_width, image_height = None, None
+                raw_frames.append({
+                    'id': f'raw:bean:{folder.name}:{frame_key}',
+                    'round_id': folder.name,
+                    'frame_key': frame_key,
+                    'captured_at': row.get('captured_at'),
+                    'phase': row.get('phase'),
+                    'image_path': str(image_path.resolve()),
+                    'tracks': valid_tracks,
+                    'suspicion': suggestions,
+                    'image_width': image_width,
+                    'image_height': image_height,
+                })
             history_by_track: dict[int, list[dict]] = defaultdict(list)
-            for row in _iter_frames(folder / 'frames.jsonl'):
+            for row in rows:
                 image_path = folder / 'raw' / f"{row.get('frame')}.jpg"
                 if not image_path.is_file():
                     continue
@@ -369,7 +465,50 @@ class Catalog:
                         track_id=track_id,
                         history=history,
                     ))
-        return events, len(rounds)
+        return events, len(rounds), raw_frames
+
+    def _upsert_raw_frame(self, frame: dict, updated_at: str) -> None:
+        tracks = frame.get('tracks') or []
+        confidences = [float(track[2]) for track in tracks]
+        self.connection.execute(
+            """
+            INSERT INTO raw_frames (
+                id, round_id, frame_key, captured_at, phase, image_path,
+                tracks_json, track_count, min_confidence, suspicion,
+                image_width, image_height, review_status, note, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                round_id=excluded.round_id,
+                frame_key=excluded.frame_key,
+                captured_at=excluded.captured_at,
+                phase=excluded.phase,
+                image_path=excluded.image_path,
+                tracks_json=excluded.tracks_json,
+                track_count=excluded.track_count,
+                min_confidence=excluded.min_confidence,
+                image_width=excluded.image_width,
+                image_height=excluded.image_height,
+                suspicion=excluded.suspicion,
+                updated_at=excluded.updated_at
+            """,
+            (
+                frame['id'],
+                frame['round_id'],
+                frame['frame_key'],
+                frame.get('captured_at'),
+                frame.get('phase'),
+                frame['image_path'],
+                _json(tracks),
+                len(tracks),
+                min(confidences) if confidences else None,
+                _json(frame.get('suspicion') or []),
+                frame.get('image_width'),
+                frame.get('image_height'),
+                frame.get('review_status', 'unreviewed'),
+                frame.get('note'),
+                updated_at,
+            ),
+        )
 
     def _scan_boss(self) -> tuple[list[dict], int]:
         events = []
@@ -666,6 +805,251 @@ class Catalog:
             'SELECT * FROM events WHERE id = ?', (event_id,)
         ).fetchone()
         return self._event_payload(row) if row else None
+
+    def _raw_frame_payload(self, row: sqlite3.Row) -> dict:
+        self._ensure_class_table()
+        payload = dict(row)
+        try:
+            payload['tracks'] = json.loads(payload.pop('tracks_json') or '[]')
+        except json.JSONDecodeError:
+            payload['tracks'] = []
+        try:
+            payload['suspicion'] = json.loads(payload.get('suspicion') or '[]')
+        except json.JSONDecodeError:
+            payload['suspicion'] = []
+        tracks = []
+        width = int(payload.get('image_width') or 1280)
+        height = int(payload.get('image_height') or 720)
+        for track in payload['tracks']:
+            cx, cy, box_width, box_height = map(float, track[3:7])
+            row_data = self._row_for(int(track[1]))
+            tracks.append({
+                'track_id': int(track[0]),
+                'class_id': int(track[1]),
+                'label': row_data.get('label'),
+                'name': row_data.get('name'),
+                'rarity': row_data.get('rarity'),
+                'confidence': float(track[2]),
+                'box': {
+                    'x1': max(0.0, cx - box_width / 2),
+                    'y1': max(0.0, cy - box_height / 2),
+                    'x2': min(float(width), cx + box_width / 2),
+                    'y2': min(float(height), cy + box_height / 2),
+                },
+            })
+        payload['tracks'] = tracks
+        payload['image_url'] = f"/api/raw-frames/{payload['id']}/image"
+        payload['manual_shapes'] = self.manual_shapes(payload['id'])
+        return payload
+
+    def list_raw_frames(
+        self,
+        *,
+        round_id: str | None = None,
+        filter_name: str = 'all',
+        limit: int = 48,
+        offset: int = 0,
+    ) -> dict:
+        clauses = []
+        values: list[Any] = []
+        if round_id:
+            clauses.append('round_id = ?')
+            values.append(round_id)
+        if filter_name == 'empty':
+            clauses.append("instr(suspicion, '\"empty_detection\"') > 0")
+        elif filter_name == 'low':
+            clauses.append("instr(suspicion, '\"low_confidence\"') > 0")
+        elif filter_name == 'flip':
+            clauses.append("instr(suspicion, '\"class_flip\"') > 0")
+        elif filter_name == 'suspect':
+            clauses.append(
+                "(instr(suspicion, '\"low_confidence\"') > 0 "
+                "OR instr(suspicion, '\"class_flip\"') > 0 "
+                "OR instr(suspicion, '\"empty_detection\"') > 0)"
+            )
+        elif filter_name == 'candidate':
+            clauses.append("review_status = 'candidate'")
+        elif filter_name == 'annotated':
+            clauses.append("review_status = 'annotated'")
+        elif filter_name == 'unreviewed':
+            clauses.append("review_status = 'unreviewed'")
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ''
+        total = self.connection.execute(
+            f'SELECT COUNT(*) FROM raw_frames {where}', values
+        ).fetchone()[0]
+        rows = self.connection.execute(
+            f'SELECT * FROM raw_frames {where} '
+            'ORDER BY round_id DESC, frame_key DESC LIMIT ? OFFSET ?',
+            [*values, max(1, min(int(limit), 200)), max(0, int(offset))],
+        ).fetchall()
+        return {
+            'total': total,
+            'limit': limit,
+            'offset': offset,
+            'items': [self._raw_frame_payload(row) for row in rows],
+        }
+
+    def raw_frame_rounds(self) -> list[dict]:
+        return [
+            dict(row)
+            for row in self.connection.execute(
+                'SELECT round_id, COUNT(*) AS frames, '
+                "SUM(CASE WHEN instr(suspicion, '\"empty_detection\"') > 0 THEN 1 ELSE 0 END) AS empty_frames, "
+                "SUM(CASE WHEN review_status = 'candidate' THEN 1 ELSE 0 END) AS candidates, "
+                "SUM(CASE WHEN review_status = 'annotated' THEN 1 ELSE 0 END) AS annotated "
+                'FROM raw_frames GROUP BY round_id ORDER BY round_id DESC'
+            ).fetchall()
+        ]
+
+    def get_raw_frame(self, frame_id: str) -> dict | None:
+        row = self.connection.execute(
+            'SELECT * FROM raw_frames WHERE id=?', (frame_id,)
+        ).fetchone()
+        return self._raw_frame_payload(row) if row else None
+
+    def mark_raw_frame(self, frame_id: str, action: str, note: str = '') -> dict:
+        mapping = {
+            'candidate': 'candidate',
+            'not_new': 'not_new',
+            'skip': 'skipped',
+            'reset': 'unreviewed',
+        }
+        if action not in mapping:
+            raise ValueError('不支持的盲扫状态')
+        frame = self.get_raw_frame(frame_id)
+        if not frame:
+            raise KeyError(frame_id)
+        self.connection.execute(
+            'UPDATE raw_frames SET review_status=?, note=?, updated_at=? WHERE id=?',
+            (mapping[action], note.strip() or None, _now(), frame_id),
+        )
+        self.connection.commit()
+        return self.get_raw_frame(frame_id)
+
+    def prepare_raw_label_package(self, frame_id: str) -> dict:
+        self._ensure_class_table()
+        frame = self.get_raw_frame(frame_id)
+        if not frame:
+            raise KeyError(frame_id)
+        slug = frame_id.replace(':', '_').replace('/', '_')
+        target = self.paths.state_root / 'scan_review' / slug
+        target.mkdir(parents=True, exist_ok=True)
+        (target / 'classes.txt').write_text(
+            '\n'.join(
+                f"{row['label']} {row['name']}"
+                for _, row in sorted(self.class_table.items())
+            ) + '\n',
+            encoding='utf-8',
+        )
+        source = Path(frame['image_path'])
+        image_name = f'frame{source.suffix.lower() or ".jpg"}'
+        image_target = target / image_name
+        if not image_target.exists():
+            try:
+                os.link(source, image_target)
+            except OSError:
+                shutil.copy2(source, image_target)
+        annotation_path = image_target.with_suffix('.json')
+        if not annotation_path.exists():
+            shapes = []
+            for track in frame.get('tracks') or []:
+                label = track.get('label')
+                if not label:
+                    continue
+                box = track['box']
+                shapes.append({
+                    'label': label,
+                    'points': [[box['x1'], box['y1']], [box['x2'], box['y2']]],
+                    'group_id': None,
+                    'shape_type': 'rectangle',
+                    'flags': {'source': 'old_model'},
+                    'description': '旧模型预标注，可能是错误类别；漏检目标需手动补框',
+                })
+            payload = {
+                'version': '4.1.1',
+                'flags': {
+                    'model_suggestion': True,
+                    'reviewed': False,
+                    'workbench_raw_frame': frame_id,
+                },
+                'shapes': shapes,
+                'imagePath': image_name,
+                'imageData': None,
+                'imageHeight': frame.get('image_height'),
+                'imageWidth': frame.get('image_width'),
+            }
+            annotation_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=1),
+                encoding='utf-8',
+            )
+        return {
+            'folder': str(target),
+            'image': str(image_target),
+            'annotation': str(annotation_path),
+            'classes': str(target / 'classes.txt'),
+            'xanylabeling_url': 'https://github.com/CVHub520/X-AnyLabeling',
+        }
+
+    def import_raw_label_package(self, frame_id: str) -> dict:
+        self._ensure_class_table()
+        frame = self.get_raw_frame(frame_id)
+        if not frame:
+            raise KeyError(frame_id)
+        slug = frame_id.replace(':', '_').replace('/', '_')
+        folder = self.paths.state_root / 'scan_review' / slug
+        annotations = sorted(folder.glob('frame*.json')) if folder.is_dir() else []
+        if not annotations:
+            raise ValueError('尚未生成或保存 X-AnyLabeling 标注')
+        payload = _read_json(annotations[0], {}) or {}
+        imported = []
+        now = _now()
+        for shape in payload.get('shapes') or []:
+            label = shape.get('label')
+            class_id = self.label_to_class.get(label)
+            box = self._shape_box(shape)
+            if class_id is None or box is None:
+                continue
+            imported.append((int(class_id), label, box))
+        if not imported:
+            raise ValueError('标注结果中没有可用类别和矩形框')
+        self.connection.execute('DELETE FROM manual_shapes WHERE frame_id=?', (frame_id,))
+        for class_id, label, box in imported:
+            self.connection.execute(
+                """
+                INSERT INTO manual_shapes(frame_id, class_id, label, box_json, source, created_at)
+                VALUES (?, ?, ?, ?, 'xanylabeling', ?)
+                """,
+                (frame_id, class_id, label, _json(box), now),
+            )
+        self.connection.execute(
+            "UPDATE raw_frames SET review_status='annotated', updated_at=? WHERE id=?",
+            (now, frame_id),
+        )
+        self.connection.commit()
+        return {
+            'frame': self.get_raw_frame(frame_id),
+            'imported': len(imported),
+        }
+
+    def manual_shapes(self, frame_id: str | None = None) -> list[dict]:
+        if frame_id:
+            rows = self.connection.execute(
+                'SELECT * FROM manual_shapes WHERE frame_id=? ORDER BY id',
+                (frame_id,),
+            ).fetchall()
+        else:
+            rows = self.connection.execute(
+                'SELECT * FROM manual_shapes ORDER BY id'
+            ).fetchall()
+        result = []
+        for row in rows:
+            payload = dict(row)
+            try:
+                payload['box'] = json.loads(payload.pop('box_json'))
+            except json.JSONDecodeError:
+                continue
+            result.append(payload)
+        return result
 
     def list_classes(
         self,

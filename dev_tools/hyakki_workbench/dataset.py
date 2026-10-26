@@ -56,8 +56,10 @@ class DatasetBuilder:
     def readiness(self) -> dict:
         self.catalog._ensure_class_table()
         events = self._reviewed_events()
+        manual_shapes = self.catalog.manual_shapes()
         by_class: dict[int, list[dict]] = defaultdict(list)
         missing_box = Counter()
+        manual_frames_by_class: dict[int, set[str]] = defaultdict(set)
         for event in events:
             class_id = event.get('reviewed_class_id')
             if class_id is None:
@@ -66,17 +68,24 @@ class DatasetBuilder:
             by_class[class_id].append(event)
             if not self._samples_for_event(event):
                 missing_box[class_id] += 1
+        for shape in manual_shapes:
+            manual_frames_by_class[int(shape['class_id'])].add(shape['frame_id'])
 
         rows = []
-        for class_id, members in by_class.items():
+        for class_id in set(by_class) | set(manual_frames_by_class):
+            members = by_class.get(class_id, [])
             registry = self.catalog.class_table.get(class_id, {})
             ready = sum(1 for event in members if self._samples_for_event(event))
+            manual_frames = len(manual_frames_by_class.get(class_id, set()))
+            ready += manual_frames
             rows.append({
                 'class_id': class_id,
                 'label': registry.get('label'),
                 'name': registry.get('name'),
                 'rarity': registry.get('rarity'),
-                'events': len(members),
+                'events': len(members) + manual_frames,
+                'reviewed_events': len(members),
+                'manual_frames': manual_frames,
                 'box_ready_events': ready,
                 'missing_box_events': missing_box[class_id],
                 'gate': _gate(ready),
@@ -88,10 +97,20 @@ class DatasetBuilder:
             -row['box_ready_events'],
             row['class_id'],
         ))
+        manual_rounds = {
+            row['round_id']
+            for row in self.catalog.connection.execute(
+                'SELECT DISTINCT f.round_id FROM manual_shapes s '
+                'JOIN raw_frames f ON f.id=s.frame_id'
+            ).fetchall()
+        }
         groups = {_group_key(event) for event in events}
+        groups.update(f'bean:{round_id}' for round_id in manual_rounds)
         selected_default = [row['class_id'] for row in rows if row['gate'] != 'insufficient']
         return {
             'reviewed_events': len(events),
+            'manual_frames': len({shape['frame_id'] for shape in manual_shapes}),
+            'manual_shapes': len(manual_shapes),
             'round_groups': len(groups),
             'round_groups_detail': sorted(groups),
             'classes': rows,
@@ -164,6 +183,12 @@ class DatasetBuilder:
 
     def _empty_negatives(self) -> list[dict]:
         result = []
+        excluded_ids = {
+            row['id']
+            for row in self.catalog.connection.execute(
+                "SELECT id FROM raw_frames WHERE review_status IN ('candidate', 'annotated')"
+            ).fetchall()
+        }
         for folder in _iter_directories(self.catalog.paths.bean_capture):
             empty = []
             for row in _iter_frames(folder / 'frames.jsonl'):
@@ -171,8 +196,11 @@ class DatasetBuilder:
                     continue
                 image_path = folder / 'raw' / f"{row.get('frame')}.jpg"
                 if image_path.is_file():
+                    frame_id = f"raw:bean:{folder.name}:{row.get('frame')}"
+                    if frame_id in excluded_ids:
+                        continue
                     empty.append({
-                        'id': f"negative:bean:{folder.name}:{row.get('frame')}",
+                        'id': frame_id,
                         'source_kind': 'bean',
                         'round_id': folder.name,
                         'frame': row.get('frame'),
@@ -235,8 +263,6 @@ class DatasetBuilder:
             event for event in self._reviewed_events()
             if event.get('reviewed_class_id') in selected
         ]
-        if not events:
-            raise ValueError('所选类别没有已审核事件')
 
         samples = []
         excluded = []
@@ -267,6 +293,33 @@ class DatasetBuilder:
                     'rarity': self.catalog.class_table[int(sample['class_id'])]['rarity'],
                     'label': self.catalog.class_table[int(sample['class_id'])]['label'],
                 })
+
+        raw_frames = {
+            row['id']: row
+            for row in self.catalog.connection.execute(
+                'SELECT * FROM raw_frames'
+            ).fetchall()
+        }
+        for shape in self.catalog.manual_shapes():
+            class_id = int(shape['class_id'])
+            if class_id not in selected:
+                continue
+            frame = raw_frames.get(shape['frame_id'])
+            if not frame:
+                continue
+            samples.append({
+                'image_index': 0,
+                'image_path': frame['image_path'],
+                'box': shape['box'],
+                'class_id': class_id,
+                'label_source': 'raw_frame_xanylabeling',
+                'event_id': f"manual:{shape['frame_id']}:{shape['id']}",
+                'source_kind': 'bean',
+                'round_id': frame['round_id'],
+                'old_class_id': None,
+                'rarity': self.catalog.class_table[class_id]['rarity'],
+                'label': self.catalog.class_table[class_id]['label'],
+            })
 
         if not samples:
             raise ValueError('所选类别没有包含可用图片和矩形框')
@@ -402,6 +455,9 @@ class DatasetBuilder:
                 'stats': {
                     'images': len(rows) + len(empty_negatives),
                     'positive_images': len(rows),
+                    'manual_positive_images': sum(
+                        1 for row in rows if row['label_source'] == 'raw_frame_xanylabeling'
+                    ),
                     'empty_negative_images': len(empty_negatives),
                     'boxes': len(rows),
                     'per_split': dict(per_split),

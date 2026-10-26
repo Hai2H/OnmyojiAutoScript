@@ -109,6 +109,28 @@ class WorkbenchCatalogTest(unittest.TestCase):
             self.assertGreater(capture['total_bytes'], 0)
             high_page = store.list_events(rarity='SSR,SP,UR')
             self.assertEqual(high_page['total'], 2)
+            raw_page = store.list_raw_frames(filter_name='all')
+            self.assertEqual(raw_page['total'], 2)
+            raw_id = 'raw:bean:2026-10-26_12-00-00_r001:frame_000002'
+            raw = store.get_raw_frame(raw_id)
+            self.assertEqual(raw['track_count'], 1)
+            marked = store.mark_raw_frame(raw_id, 'candidate', '疑似新式神')
+            self.assertEqual(marked['review_status'], 'candidate')
+
+            raw_package = store.prepare_raw_label_package(raw_id)
+            raw_annotation = Path(raw_package['annotation'])
+            raw_payload = json.loads(raw_annotation.read_text(encoding='utf-8'))
+            raw_payload['shapes'].append({
+                'label': 'sp_051',
+                'points': [[20, 30], [120, 150]],
+                'shape_type': 'rectangle',
+            })
+            raw_annotation.write_text(json.dumps(raw_payload), encoding='utf-8')
+            raw_import = store.import_raw_label_package(raw_id)
+            self.assertEqual(raw_import['imported'], 2)
+            self.assertEqual(raw_import['frame']['review_status'], 'annotated')
+            manual = store.manual_shapes(raw_id)
+            self.assertEqual({item['label'] for item in manual}, {'ssr_075', 'sp_051'})
 
             reviewed = store.review_event('bean:2026-10-26_12-00-00_r001:7', action='correct')
             self.assertEqual(reviewed['status'], 'correct')
@@ -194,12 +216,27 @@ class WorkbenchCatalogTest(unittest.TestCase):
         store = WorkbenchStore.open(self.paths(bean_root, self.root / 'boss_capture'))
         try:
             store.scan()
+            raw_id = 'raw:bean:round_a:frame_000001'
+            raw_package = store.prepare_raw_label_package(raw_id)
+            raw_annotation = Path(raw_package['annotation'])
+            raw_payload = json.loads(raw_annotation.read_text(encoding='utf-8'))
+            raw_payload['shapes'] = [{
+                'label': 'sp_051',
+                'points': [[10, 10], [80, 120]],
+                'shape_type': 'rectangle',
+            }]
+            raw_annotation.write_text(json.dumps(raw_payload), encoding='utf-8')
+            store.import_raw_label_package(raw_id)
             for event_id in event_ids:
                 store.review_event(event_id, action='correct')
             readiness = DatasetBuilder(store).readiness()
             self.assertEqual(readiness['round_groups'], 2)
             self.assertEqual(readiness['reviewed_events'], 20)
-            self.assertEqual(readiness['classes'][0]['label'], 'ssr_075')
+            self.assertEqual(readiness['manual_frames'], 1)
+            event_class = next(row for row in readiness['classes'] if row['label'] == 'ssr_075')
+            self.assertEqual(event_class['box_ready_events'], 20)
+            manual_class = next(row for row in readiness['classes'] if row['label'] == 'sp_051')
+            self.assertEqual(manual_class['manual_frames'], 1)
 
             result = DatasetBuilder(store).build([265])
             target = Path(result['path'])

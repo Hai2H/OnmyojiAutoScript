@@ -58,6 +58,11 @@ class ActivateModelRequest(BaseModel):
     mode: str = 'shadow'
 
 
+class RawFrameStatusRequest(BaseModel):
+    action: str = Field(pattern='^(candidate|not_new|skip|reset)$')
+    note: str = ''
+
+
 def create_app(paths: WorkspacePaths | None = None) -> FastAPI:
     workspace = paths or WorkspacePaths()
     workspace.ensure()
@@ -138,6 +143,87 @@ def create_app(paths: WorkspacePaths | None = None) -> FastAPI:
     def capture() -> dict:
         with open_store() as catalog:
             return catalog.capture_summary()
+
+    @app.get('/api/raw-frames')
+    def raw_frames(
+        round_id: str | None = None,
+        filter_name: str = Query(default='all', alias='filter'),
+        limit: int = Query(default=48, ge=1, le=200),
+        offset: int = Query(default=0, ge=0),
+    ) -> dict:
+        with open_store() as catalog:
+            return catalog.list_raw_frames(
+                round_id=round_id,
+                filter_name=filter_name,
+                limit=limit,
+                offset=offset,
+            )
+
+    @app.get('/api/raw-frames/rounds')
+    def raw_frame_rounds() -> dict:
+        with open_store() as catalog:
+            return {'items': catalog.raw_frame_rounds()}
+
+    @app.get('/api/raw-frames/{frame_id}')
+    def raw_frame_detail(frame_id: str) -> dict:
+        with open_store() as catalog:
+            frame = catalog.get_raw_frame(frame_id)
+            if not frame:
+                raise HTTPException(status_code=404, detail='原始帧不存在')
+            return frame
+
+    @app.get('/api/raw-frames/{frame_id}/image')
+    def raw_frame_image(frame_id: str) -> FileResponse:
+        with open_store() as catalog:
+            frame = catalog.get_raw_frame(frame_id)
+            if not frame:
+                raise HTTPException(status_code=404, detail='原始帧不存在')
+            path = Path(frame['image_path'])
+            if not workspace.is_source_media(path):
+                raise HTTPException(status_code=403, detail='不是采集目录中的图片')
+            return FileResponse(path)
+
+    @app.post('/api/raw-frames/{frame_id}/status')
+    def raw_frame_status(frame_id: str, request: RawFrameStatusRequest) -> dict:
+        with open_store() as catalog:
+            try:
+                return catalog.mark_raw_frame(frame_id, request.action, request.note)
+            except KeyError as exception:
+                raise HTTPException(status_code=404, detail='原始帧不存在') from exception
+            except ValueError as exception:
+                raise HTTPException(status_code=422, detail=str(exception)) from exception
+
+    @app.post('/api/raw-frames/{frame_id}/prepare-label')
+    def prepare_raw_frame_label(frame_id: str) -> dict:
+        with open_store() as catalog:
+            try:
+                return catalog.prepare_raw_label_package(frame_id)
+            except KeyError as exception:
+                raise HTTPException(status_code=404, detail='原始帧不存在') from exception
+
+    @app.post('/api/raw-frames/{frame_id}/open-label-folder')
+    def open_raw_frame_label_folder(frame_id: str) -> dict:
+        folder = workspace.state_root / 'scan_review' / frame_id.replace(':', '_').replace('/', '_')
+        if not folder.is_dir():
+            raise HTTPException(status_code=422, detail='请先生成标注目录')
+        try:
+            if os.name == 'nt':
+                os.startfile(str(folder))
+            else:
+                subprocess.Popen(['xdg-open', str(folder)])
+        except OSError as exception:
+            raise HTTPException(status_code=500, detail=f'打开目录失败：{exception}') from exception
+        return {'ok': True, 'folder': str(folder)}
+
+    @app.post('/api/raw-frames/{frame_id}/import-label')
+    def import_raw_frame_label(frame_id: str) -> dict:
+        with open_store() as catalog:
+            try:
+                return catalog.import_raw_label_package(frame_id)
+            except KeyError as exception:
+                raise HTTPException(status_code=404, detail='原始帧不存在') from exception
+            except ValueError as exception:
+                raise HTTPException(status_code=422, detail=str(exception)) from exception
 
     @app.get('/api/events/{event_id}')
     def event_detail(event_id: str) -> dict:

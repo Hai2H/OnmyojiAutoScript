@@ -74,7 +74,7 @@ h3 { font-size: 16px; }
 .button:disabled { opacity: .55; cursor: wait; transform: none; }
 .steps {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(7, 1fr);
   gap: 1px;
   border-bottom: 1px solid var(--line);
   background: var(--line);
@@ -492,6 +492,114 @@ main { max-width: 1450px; margin: 0 auto; padding: 28px clamp(20px, 4vw, 64px) 7
 }
 .capture-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .capture-row span { color: var(--muted); }
+.plain-select {
+  min-width: 250px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #10161c;
+  color: var(--text);
+}
+.scan-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.scan-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(320px, .85fr);
+  gap: 14px;
+  align-items: start;
+}
+.scan-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.scan-grid.empty { min-height: 320px; place-content: center; color: var(--muted); text-align: center; }
+.scan-card {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #06080b;
+  color: var(--text);
+  cursor: pointer;
+}
+.scan-card:hover, .scan-card.active { border-color: var(--accent); }
+.scan-card img { width: 100%; height: 100%; object-fit: cover; }
+.scan-card-status {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(6, 10, 14, .82);
+  color: var(--muted);
+  font-size: 9px;
+}
+.scan-card-status.candidate { color: #fde68a; }
+.scan-card-status.annotated { color: #a7f3d0; }
+.scan-card-suspect {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(90, 43, 31, .9);
+  color: #fecaca;
+  font-size: 9px;
+}
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 13px;
+}
+.scan-detail { position: sticky; top: 12px; }
+.scan-content { display: grid; gap: 11px; }
+.scan-image-shell { min-height: 240px; }
+.scan-image-shell img { width: 100%; max-height: 54vh; }
+.scan-boxes { position: absolute; inset: 0; pointer-events: none; }
+.scan-box {
+  position: absolute;
+  border: 2px solid #fbbf24;
+  border-radius: 3px;
+}
+.scan-box.manual { border-color: #34d399; }
+.scan-box span {
+  position: absolute;
+  left: -2px;
+  top: -20px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #7c5b16;
+  color: white;
+  font-size: 9px;
+  white-space: nowrap;
+}
+.scan-box.manual span { background: #176348; }
+.scan-detail textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0f141a;
+  color: var(--text);
+}
+.manual-shapes { display: flex; flex-wrap: wrap; gap: 6px; }
+.manual-shape {
+  padding: 4px 8px;
+  border: 1px solid #306951;
+  border-radius: 999px;
+  color: #a7f3d0;
+  font-size: 10px;
+}
 #toast {
   position: fixed;
   right: 24px;
@@ -518,6 +626,9 @@ main { max-width: 1450px; margin: 0 auto; padding: 28px clamp(20px, 4vw, 64px) 7
   .dataset-layout { grid-template-columns: 1fr; }
   .training-layout { grid-template-columns: 1fr; }
   .deployment-layout { grid-template-columns: 1fr; }
+  .scan-layout { grid-template-columns: 1fr; }
+  .scan-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .scan-detail { position: static; }
   .review-queue, .review-actions { max-height: none; }
   .review-list { max-height: 320px; }
 }
@@ -531,4 +642,6 @@ main { max-width: 1450px; margin: 0 auto; padding: 28px clamp(20px, 4vw, 64px) 7
   .rarity { display: none; }
   .segmented { width: 100%; overflow-x: auto; }
   .prediction-row { grid-template-columns: repeat(2, 1fr); }
+  .scan-toolbar { align-items: flex-start; flex-direction: column; }
+  .scan-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
