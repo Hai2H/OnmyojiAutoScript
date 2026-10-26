@@ -214,10 +214,22 @@ async function loadCapturePage() {
 }
 
 function reviewQuery(filter) {
-  if (filter === 'high') return '/api/events?pending_high_only=true&limit=200';
+  if (filter === 'high') return '/api/events?rarity=UR,SP,SSR&limit=200';
   if (filter === 'pending') return '/api/events?status=pending,needs_label&limit=200';
   if (filter === 'unknown') return '/api/events?status=unknown,needs_label&limit=200';
   return '/api/events?status=correct,changed,unknown&limit=200';
+}
+
+function clearReviewSelection(message = '当前筛选下没有事件。') {
+  state.reviewEvent = null;
+  state.reviewImageIndex = 0;
+  state.labelPackage = null;
+  $('#review-empty').hidden = false;
+  $('#review-empty').querySelector('strong').textContent = message;
+  $('#review-empty').querySelector('span').textContent = '可以切换筛选条件，或先扫描新的采集数据。';
+  $('#review-content').hidden = true;
+  $('#review-image').removeAttribute('src');
+  $('#review-box').hidden = true;
 }
 
 async function loadReviewQueue(selectFirst = false) {
@@ -229,6 +241,7 @@ async function loadReviewQueue(selectFirst = false) {
     $('#review-total').textContent = payload.total ?? 0;
     if (!payload.items?.length) {
       list.textContent = '当前筛选下没有事件。';
+      clearReviewSelection();
       return;
     }
     list.className = 'review-list';

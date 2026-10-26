@@ -107,6 +107,8 @@ class WorkbenchCatalogTest(unittest.TestCase):
             self.assertEqual(capture['bean']['rounds'], 1)
             self.assertEqual(capture['boss']['rounds'], 1)
             self.assertGreater(capture['total_bytes'], 0)
+            high_page = store.list_events(rarity='SSR,SP,UR')
+            self.assertEqual(high_page['total'], 2)
 
             reviewed = store.review_event('bean:2026-10-26_12-00-00_r001:7', action='correct')
             self.assertEqual(reviewed['status'], 'correct')

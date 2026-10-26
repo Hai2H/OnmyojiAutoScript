@@ -633,8 +633,14 @@ class Catalog:
             clauses.append('source_kind = ?')
             values.append(source)
         if rarity:
-            clauses.append('rarity = ?')
-            values.append(rarity)
+            rarities = [item.strip() for item in rarity.split(',') if item.strip()]
+            if len(rarities) == 1:
+                clauses.append('rarity = ?')
+                values.append(rarities[0])
+            elif rarities:
+                placeholders = ', '.join('?' for _ in rarities)
+                clauses.append(f'rarity IN ({placeholders})')
+                values.extend(rarities)
         if pending_high_only:
             clauses.append("status = 'pending' AND rarity IN ('SSR', 'SP', 'UR')")
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ''
