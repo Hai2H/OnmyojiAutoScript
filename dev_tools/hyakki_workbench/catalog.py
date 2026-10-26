@@ -910,6 +910,8 @@ class Catalog:
     def mark_raw_frame(self, frame_id: str, action: str, note: str = '') -> dict:
         mapping = {
             'candidate': 'candidate',
+            'no_action': 'no_action',
+            # 兼容早期盲扫状态。
             'not_new': 'not_new',
             'skip': 'skipped',
             'reset': 'unreviewed',

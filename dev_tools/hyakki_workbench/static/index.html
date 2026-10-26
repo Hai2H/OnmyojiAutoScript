@@ -104,15 +104,21 @@
       </div>
       <div class="scan-toolbar">
         <div class="segmented" id="scan-filters">
-          <button class="active" data-scan-filter="all">全部帧</button>
+          <button class="active" data-scan-filter="unreviewed">待处理</button>
+          <button data-scan-filter="candidate">需要补框</button>
+          <button data-scan-filter="annotated">已标注</button>
+          <button data-scan-filter="all">全部帧</button>
           <button data-scan-filter="suspect">可疑帧</button>
           <button data-scan-filter="empty">空检测</button>
-          <button data-scan-filter="low">低置信</button>
           <button data-scan-filter="flip">类别跳变</button>
-          <button data-scan-filter="candidate">待补充目标</button>
-          <button data-scan-filter="annotated">已标注</button>
         </div>
         <span id="scan-total" class="status-chip">0 帧</span>
+      </div>
+      <div class="scan-shortcuts">
+        <span><kbd>1</kbd> 无需补框并下一帧</span>
+        <span><kbd>2</kbd> 需要补框并下一帧</span>
+        <span><kbd>0</kbd> 跳过</span>
+        <span><kbd>←</kbd><kbd>→</kbd> 浏览</span>
       </div>
       <div class="scan-layout">
         <article class="panel scan-gallery-panel">
@@ -141,8 +147,8 @@
             </div>
             <div id="scan-tags" class="tag-list"></div>
             <div class="row">
-              <button id="scan-candidate" class="action-button warning">标记为待补充目标</button>
-              <button id="scan-not-new" class="action-button">不是新式神</button>
+              <button id="scan-candidate" class="action-button warning">需要补框并下一帧 <small>2</small></button>
+              <button id="scan-not-new" class="action-button">无需补框并下一帧 <small>1</small></button>
               <button id="scan-reset" class="text-button">恢复未处理</button>
             </div>
             <label for="scan-note" class="field-label">盲扫备注</label>

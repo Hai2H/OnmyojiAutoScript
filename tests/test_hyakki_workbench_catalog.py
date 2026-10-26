@@ -182,6 +182,8 @@ class WorkbenchCatalogTest(unittest.TestCase):
         store = WorkbenchStore.open(self.paths(bean_root, self.root / 'boss_capture'))
         try:
             store.scan()
+            raw_id = 'raw:bean:round:frame_000001'
+            store.mark_raw_frame(raw_id, 'no_action')
             store.connection.execute(
                 "UPDATE events SET status='correct', reviewed_class_id=265, "
                 "reviewed_label='ssr_075', reviewed_at='2026-10-26 12:00:00'"
@@ -191,6 +193,8 @@ class WorkbenchCatalogTest(unittest.TestCase):
             event = store.get_event('bean:round:1')
             self.assertEqual(event['status'], 'correct')
             self.assertEqual(event['reviewed_class_id'], 265)
+            self.assertEqual(store.get_raw_frame(raw_id)['review_status'], 'no_action')
+            self.assertEqual(store.list_raw_frames(filter_name='unreviewed')['total'], 0)
         finally:
             store.close()
 

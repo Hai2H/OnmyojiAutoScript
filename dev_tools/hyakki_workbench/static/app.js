@@ -13,12 +13,14 @@ const state = {
   currentJob: null,
   trainingPoll: null,
   deployment: null,
-  scanFilter: 'all',
+  scanFilter: 'unreviewed',
   scanRound: '',
   scanOffset: 0,
   scanLimit: 48,
   scanCurrent: null,
   scanPackage: null,
+  scanItems: [],
+  scanTotal: 0,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -221,7 +223,8 @@ async function loadCapturePage() {
 
 const scanStatusLabels = {
   unreviewed: '未处理',
-  candidate: '待补充目标',
+  candidate: '需要补框',
+  no_action: '无需补框',
   not_new: '不是新式神',
   skipped: '已跳过',
   annotated: '已标注',
@@ -240,6 +243,8 @@ async function loadScanRounds() {
 
 function renderScanGallery(payload) {
   const grid = $('#scan-grid');
+  state.scanItems = payload.items || [];
+  state.scanTotal = payload.total || 0;
   $('#scan-total').textContent = `${payload.total || 0} 帧`;
   const page = Math.floor((payload.offset || 0) / state.scanLimit) + 1;
   const pages = Math.max(1, Math.ceil((payload.total || 0) / state.scanLimit));
@@ -273,9 +278,16 @@ async function loadScanFrames() {
   });
   if (state.scanRound) params.set('round_id', state.scanRound);
   try {
-    renderScanGallery(await api(`/api/raw-frames?${params}`));
+    const payload = await api(`/api/raw-frames?${params}`);
+    if (!payload.items?.length && payload.total > 0 && state.scanOffset > 0) {
+      state.scanOffset = Math.max(0, Math.floor((payload.total - 1) / state.scanLimit) * state.scanLimit);
+      return loadScanFrames();
+    }
+    renderScanGallery(payload);
+    return payload;
   } catch (error) {
     toast(`读取原始帧失败：${error.message}`);
+    return null;
   }
 }
 
@@ -355,19 +367,61 @@ async function selectScanFrame(frameId) {
   }
 }
 
-async function markScanFrame(action) {
+async function markScanFrame(action, { advance = false, prepare = false } = {}) {
   if (!state.scanCurrent) return;
+  const currentIndex = state.scanItems.findIndex((item) => item.id === state.scanCurrent.id);
+  const nextId = currentIndex >= 0 ? state.scanItems[currentIndex + 1]?.id : null;
   try {
     const frame = await api(`/api/raw-frames/${encodeURIComponent(state.scanCurrent.id)}/status`, {
       method: 'POST',
       body: JSON.stringify({ action, note: $('#scan-note').value }),
     });
-    renderScanDetail(frame);
+    if (prepare && action === 'candidate') {
+      const packageInfo = await api(`/api/raw-frames/${encodeURIComponent(frame.id)}/prepare-label`, {
+        method: 'POST',
+      });
+      state.scanPackage = packageInfo;
+    }
     await loadScanFrames();
     toast(`已标记为：${scanStatusLabels[frame.review_status]}`);
+    if (advance) {
+      const target = state.scanItems.find((item) => item.id === nextId) || state.scanItems[0];
+      if (target) {
+        await selectScanFrame(target.id);
+      } else {
+        clearScanSelection();
+      }
+    } else {
+      renderScanDetail(frame);
+    }
   } catch (error) {
     toast(`保存盲扫状态失败：${error.message}`);
   }
+}
+
+async function moveScan(direction) {
+  if (!state.scanItems.length) return;
+  const currentIndex = state.scanCurrent
+    ? state.scanItems.findIndex((item) => item.id === state.scanCurrent.id)
+    : -1;
+  const targetIndex = currentIndex + direction;
+  if (targetIndex >= 0 && targetIndex < state.scanItems.length) {
+    await selectScanFrame(state.scanItems[targetIndex].id);
+    return;
+  }
+  if (direction > 0 && state.scanOffset + state.scanLimit < state.scanTotal) {
+    state.scanOffset += state.scanLimit;
+    const payload = await loadScanFrames();
+    if (payload?.items?.length) await selectScanFrame(payload.items[0].id);
+    return;
+  }
+  if (direction < 0 && state.scanOffset > 0) {
+    state.scanOffset = Math.max(0, state.scanOffset - state.scanLimit);
+    const payload = await loadScanFrames();
+    if (payload?.items?.length) await selectScanFrame(payload.items.at(-1).id);
+    return;
+  }
+  toast(direction > 0 ? '已经是最后一帧。' : '已经是第一帧。');
 }
 
 async function loadScanPage() {
@@ -1080,8 +1134,8 @@ $('#scan-next').addEventListener('click', () => {
   state.scanOffset += state.scanLimit;
   loadScanFrames();
 });
-$('#scan-candidate').addEventListener('click', () => markScanFrame('candidate'));
-$('#scan-not-new').addEventListener('click', () => markScanFrame('not_new'));
+$('#scan-candidate').addEventListener('click', () => markScanFrame('candidate', { advance: true, prepare: true }));
+$('#scan-not-new').addEventListener('click', () => markScanFrame('no_action', { advance: true }));
 $('#scan-reset').addEventListener('click', () => markScanFrame('reset'));
 $('#scan-prepare').addEventListener('click', async () => {
   if (!state.scanCurrent) return;
@@ -1142,6 +1196,26 @@ $('#scan-import').addEventListener('click', async () => {
 });
 $('#scan-image').addEventListener('load', renderScanBoxes);
 window.addEventListener('resize', renderScanBoxes);
+document.addEventListener('keydown', (event) => {
+  if (!$('#page-scan').classList.contains('active')) return;
+  if (event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+  if (event.key === '1') {
+    event.preventDefault();
+    markScanFrame('no_action', { advance: true });
+  } else if (event.key === '2') {
+    event.preventDefault();
+    markScanFrame('candidate', { advance: true, prepare: true });
+  } else if (event.key === '0') {
+    event.preventDefault();
+    markScanFrame('skip', { advance: true });
+  } else if (event.key === 'ArrowRight') {
+    event.preventDefault();
+    moveScan(1);
+  } else if (event.key === 'ArrowLeft') {
+    event.preventDefault();
+    moveScan(-1);
+  }
+});
 $('#model-versions').addEventListener('click', async (event) => {
   const button = event.target.closest('[data-activate-model]');
   if (!button) return;

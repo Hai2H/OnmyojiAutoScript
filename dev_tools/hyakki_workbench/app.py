@@ -59,7 +59,7 @@ class ActivateModelRequest(BaseModel):
 
 
 class RawFrameStatusRequest(BaseModel):
-    action: str = Field(pattern='^(candidate|not_new|skip|reset)$')
+    action: str = Field(pattern='^(candidate|no_action|not_new|skip|reset)$')
     note: str = ''
 
 
