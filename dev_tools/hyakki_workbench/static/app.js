@@ -1257,7 +1257,9 @@ $('#scan-batch-prepare').addEventListener('click', async () => {
     const result = await api('/api/raw-frames/batch/prepare', { method: 'POST' });
     state.scanBatch = result;
     await refreshScanBatch();
-    toast(`批量目录已生成：${result.items} 帧，新建 ${result.created_annotations} 个预标注。`);
+    toast(result.unchanged
+      ? `没有新的待补框帧，保留现有批量目录（${result.items} 帧）。`
+      : `批量目录已生成：${result.items} 帧，新建 ${result.created_annotations} 个预标注。`);
   } catch (error) {
     toast(`生成批量目录失败：${error.message}`);
   }

@@ -355,6 +355,9 @@ class WorkbenchCatalogTest(unittest.TestCase):
             self.assertEqual(result['imported_shapes'], 2)
             self.assertEqual(store.list_raw_frames(filter_name='candidate')['total'], 0)
             self.assertEqual(store.list_raw_frames(filter_name='annotated')['total'], 2)
+            unchanged = store.prepare_raw_batch()
+            self.assertTrue(unchanged['unchanged'])
+            self.assertEqual(unchanged['items'], 2)
         finally:
             store.close()
 

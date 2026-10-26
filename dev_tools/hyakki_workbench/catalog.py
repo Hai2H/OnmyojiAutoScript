@@ -1103,6 +1103,12 @@ class Catalog:
             "SELECT * FROM raw_frames WHERE review_status='candidate' "
             'ORDER BY round_id, frame_key'
         ).fetchall()
+        if not rows and (folder / 'manifest.json').is_file():
+            return {
+                **self.batch_status(),
+                'created_annotations': 0,
+                'unchanged': True,
+            }
         manifest_items = []
         created = 0
         for row in rows:
@@ -1148,6 +1154,7 @@ class Catalog:
         return {
             **self.batch_status(),
             'created_annotations': created,
+            'unchanged': False,
         }
 
     def import_raw_batch(self) -> dict:
