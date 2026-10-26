@@ -1252,7 +1252,8 @@ document.addEventListener('keydown', (event) => {
 });
 document.addEventListener('keydown', (event) => {
   if (!$('#page-review').classList.contains('active')) return;
-  if (event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+  if (event.target.closest('input, textarea, [contenteditable="true"]')) return;
+  if (event.target.closest('select') && !['1', '2', '3', '4', '0'].includes(event.key)) return;
   if (event.key === '1') {
     event.preventDefault();
     if (state.reviewEvent?.old_class_id == null) {
