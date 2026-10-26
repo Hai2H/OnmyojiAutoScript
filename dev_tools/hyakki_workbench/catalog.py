@@ -158,6 +158,21 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS event_frame_labels (
+    event_id TEXT NOT NULL,
+    image_index INTEGER NOT NULL,
+    image_path TEXT NOT NULL,
+    class_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    box_json TEXT NOT NULL,
+    source TEXT NOT NULL,
+    imported_at TEXT NOT NULL,
+    PRIMARY KEY(event_id, image_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_frame_labels_event
+    ON event_frame_labels(event_id);
 """
 
 
@@ -798,3 +813,176 @@ class Catalog:
             'files': files,
             'xanylabeling_url': 'https://github.com/CVHub520/X-AnyLabeling',
         }
+
+    @staticmethod
+    def _shape_box(shape: dict) -> dict | None:
+        points = shape.get('points') or []
+        if len(points) < 2:
+            return None
+        xs = [float(point[0]) for point in points]
+        ys = [float(point[1]) for point in points]
+        box = {
+            'x1': min(xs),
+            'y1': min(ys),
+            'x2': max(xs),
+            'y2': max(ys),
+        }
+        if box['x2'] <= box['x1'] or box['y2'] <= box['y1']:
+            return None
+        return {key: round(value, 2) for key, value in box.items()}
+
+    @staticmethod
+    def _iou(left: dict, right: dict) -> float:
+        x1 = max(left['x1'], right['x1'])
+        y1 = max(left['y1'], right['y1'])
+        x2 = min(left['x2'], right['x2'])
+        y2 = min(left['y2'], right['y2'])
+        if x2 <= x1 or y2 <= y1:
+            return 0.0
+        intersection = (x2 - x1) * (y2 - y1)
+        left_area = (left['x2'] - left['x1']) * (left['y2'] - left['y1'])
+        right_area = (right['x2'] - right['x1']) * (right['y2'] - right['y1'])
+        return intersection / max(1e-6, left_area + right_area - intersection)
+
+    def import_label_package(self, event_id: str) -> dict:
+        """Import reviewed X-AnyLabeling rectangles back into the event index."""
+        self._ensure_class_table()
+        event = self.get_event(event_id)
+        if not event:
+            raise KeyError(event_id)
+        slug = event_id.replace(':', '_').replace('/', '_')
+        folder = self.paths.state_root / 'review' / slug
+        if not folder.is_dir():
+            raise ValueError('尚未生成 X-AnyLabeling 标注目录')
+
+        imported = 0
+        skipped = 0
+        chosen_classes: Counter[int] = Counter()
+        preferred_class_id = event.get('reviewed_class_id')
+        preferred_label = event.get('reviewed_label')
+        if preferred_label == 'UNKNOWN':
+            preferred_label = None
+
+        for image_index, representative in enumerate(event.get('representatives') or []):
+            candidates = sorted(folder.glob(f'{image_index + 1:02d}_*.json'))
+            if not candidates:
+                skipped += 1
+                continue
+            payload = _read_json(candidates[0], {}) or {}
+            shapes = payload.get('shapes') or []
+            resolved = []
+            for shape in shapes:
+                label = shape.get('label')
+                class_id = self.label_to_class.get(label)
+                box = self._shape_box(shape)
+                if class_id is None or box is None:
+                    continue
+                resolved.append((shape, int(class_id), box))
+            if not resolved:
+                skipped += 1
+                continue
+
+            preferred = [
+                item for item in resolved
+                if (preferred_class_id is not None and item[1] == int(preferred_class_id))
+                or (preferred_label and item[0].get('label') == preferred_label)
+            ]
+            pool = preferred or resolved
+            old_box = representative.get('box')
+            if old_box:
+                _, class_id, box = max(pool, key=lambda item: self._iou(old_box, item[2]))
+            else:
+                _, class_id, box = max(
+                    pool,
+                    key=lambda item: (item[2]['x2'] - item[2]['x1']) * (item[2]['y2'] - item[2]['y1']),
+                )
+            row = self.class_table[class_id]
+            image_name = payload.get('imagePath') or f'{image_index + 1:02d}'
+            image_path = folder / image_name
+            if not image_path.is_file():
+                matches = sorted(folder.glob(f'{image_index + 1:02d}_*.jpg'))
+                if not matches:
+                    skipped += 1
+                    continue
+                image_path = matches[0]
+            self.connection.execute(
+                """
+                INSERT INTO event_frame_labels (
+                    event_id, image_index, image_path, class_id, label,
+                    box_json, source, imported_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(event_id, image_index) DO UPDATE SET
+                    image_path=excluded.image_path,
+                    class_id=excluded.class_id,
+                    label=excluded.label,
+                    box_json=excluded.box_json,
+                    source=excluded.source,
+                    imported_at=excluded.imported_at
+                """,
+                (
+                    event_id,
+                    image_index,
+                    str(image_path.resolve()),
+                    class_id,
+                    row['label'],
+                    _json(box),
+                    'xanylabeling',
+                    _now(),
+                ),
+            )
+            imported += 1
+            chosen_classes[class_id] += 1
+
+        if not imported:
+            raise ValueError('标注目录中还没有可用类别和矩形框')
+        chosen_class_id = chosen_classes.most_common(1)[0][0]
+        chosen_row = self.class_table[chosen_class_id]
+        status = 'correct' if chosen_class_id == event.get('old_class_id') else 'changed'
+        now = _now()
+        self.connection.execute(
+            """
+            UPDATE events SET status=?, reviewed_class_id=?, reviewed_label=?,
+                reviewed_at=?, updated_at=?
+            WHERE id=?
+            """,
+            (status, chosen_class_id, chosen_row['label'], now, now, event_id),
+        )
+        self.connection.execute(
+            """
+            INSERT INTO review_history (
+                event_id, action, previous_status, new_status, old_class_id,
+                reviewed_class_id, reviewed_label, note, created_at
+            ) VALUES (?, 'import_xany', ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event_id,
+                event['status'],
+                status,
+                event.get('old_class_id'),
+                chosen_class_id,
+                chosen_row['label'],
+                f'导入 {imported} 张人工标注',
+                now,
+            ),
+        )
+        self.connection.commit()
+        return {
+            'event': self.get_event(event_id),
+            'imported': imported,
+            'skipped': skipped,
+        }
+
+    def frame_labels(self, event_id: str) -> list[dict]:
+        rows = self.connection.execute(
+            'SELECT * FROM event_frame_labels WHERE event_id = ? ORDER BY image_index',
+            (event_id,),
+        ).fetchall()
+        result = []
+        for row in rows:
+            payload = dict(row)
+            try:
+                payload['box'] = json.loads(payload.pop('box_json'))
+            except json.JSONDecodeError:
+                continue
+            result.append(payload)
+        return result

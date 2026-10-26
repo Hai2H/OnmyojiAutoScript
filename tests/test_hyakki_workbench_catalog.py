@@ -4,11 +4,18 @@ import unittest
 from pathlib import Path
 
 from dev_tools.hyakki_workbench import WorkspacePaths, WorkbenchStore
+from dev_tools.hyakki_workbench.dataset import DatasetBuilder
+from PIL import Image
 
 
 def write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
+
+
+def write_image(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new('RGB', (320, 180), color=(20, 30, 40)).save(path)
 
 
 class WorkbenchCatalogTest(unittest.TestCase):
@@ -114,6 +121,20 @@ class WorkbenchCatalogTest(unittest.TestCase):
             self.assertTrue((Path(package['folder']) / 'classes.txt').is_file())
             self.assertEqual(len(package['files']), 2)
             self.assertTrue(Path(package['files'][0]['annotation']).is_file())
+
+            boss_package = store.prepare_label_package(changed['id'])
+            annotation_path = Path(boss_package['files'][0]['annotation'])
+            annotation = json.loads(annotation_path.read_text(encoding='utf-8'))
+            annotation['shapes'] = [{
+                'label': 'sp_051',
+                'points': [[20, 30], [120, 150]],
+                'shape_type': 'rectangle',
+            }]
+            annotation_path.write_text(json.dumps(annotation), encoding='utf-8')
+            imported = store.import_label_package(changed['id'])
+            self.assertEqual(imported['imported'], 1)
+            self.assertEqual(imported['event']['reviewed_label'], 'sp_051')
+            self.assertEqual(store.frame_labels(changed['id'])[0]['box']['x1'], 20.0)
         finally:
             store.close()
 
@@ -139,6 +160,47 @@ class WorkbenchCatalogTest(unittest.TestCase):
             event = store.get_event('bean:round:1')
             self.assertEqual(event['status'], 'correct')
             self.assertEqual(event['reviewed_class_id'], 265)
+        finally:
+            store.close()
+
+    def test_dataset_build_uses_reviewed_events_and_round_split(self) -> None:
+        bean_root = self.root / 'bean_capture'
+        event_ids = []
+        for round_name in ('round_a', 'round_b'):
+            round_root = bean_root / round_name
+            write_image(round_root / 'raw' / 'frame_000001.jpg')
+            tracks = [
+                [track_id, 265, 0.92, 40 + track_id * 24, 90, 18, 40, 0]
+                for track_id in range(1, 11)
+            ]
+            row = {
+                'frame': 'frame_000001',
+                'tracks': tracks,
+            }
+            (round_root / 'frames.jsonl').write_text(
+                json.dumps(row) + '\n',
+                encoding='utf-8',
+            )
+            event_ids.extend(f'bean:{round_name}:{track_id}' for track_id in range(1, 11))
+        store = WorkbenchStore.open(self.paths(bean_root, self.root / 'boss_capture'))
+        try:
+            store.scan()
+            for event_id in event_ids:
+                store.review_event(event_id, action='correct')
+            readiness = DatasetBuilder(store).readiness()
+            self.assertEqual(readiness['round_groups'], 2)
+            self.assertEqual(readiness['reviewed_events'], 20)
+            self.assertEqual(readiness['classes'][0]['label'], 'ssr_075')
+
+            result = DatasetBuilder(store).build([265])
+            target = Path(result['path'])
+            self.assertTrue((target / 'data.yaml').is_file())
+            self.assertTrue((target / 'manifest.json').is_file())
+            self.assertEqual(result['manifest']['stats']['positive_images'], 20)
+            self.assertEqual(set(result['manifest']['stats']['per_split']), {'train', 'val'})
+            self.assertEqual(len(DatasetBuilder(store).list_datasets()), 1)
+            data_yaml = (target / 'data.yaml').read_text(encoding='utf-8')
+            self.assertNotIn('test:', data_yaml)
         finally:
             store.close()
 

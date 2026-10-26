@@ -7,6 +7,8 @@ const state = {
   reviewImageIndex: 0,
   classes: null,
   labelPackage: null,
+  datasetReadiness: null,
+  datasets: [],
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -339,10 +341,92 @@ async function loadXanyConfig() {
   }
 }
 
+function selectedDatasetClasses() {
+  return $$('#dataset-classes input[type="checkbox"]:checked')
+    .map((input) => Number(input.value));
+}
+
+function updateDatasetSelection() {
+  const selected = selectedDatasetClasses();
+  $('#dataset-selection').textContent = selected.length
+    ? `已选择 ${selected.length} 个类别`
+    : '未选择类别';
+  $('#build-dataset').disabled = !state.datasetReadiness?.can_build || !selected.length;
+  $$('#dataset-classes tr').forEach((row) => {
+    row.classList.toggle('selected', row.querySelector('input')?.checked === true);
+  });
+}
+
+function renderDatasetReadiness(readiness) {
+  state.datasetReadiness = readiness;
+  $('#dataset-reviewed').textContent = readiness.reviewed_events ?? 0;
+  $('#dataset-groups').textContent = readiness.round_groups ?? 0;
+  $('#dataset-eligible').textContent = readiness.default_classes?.length ?? 0;
+  $('#dataset-warnings').innerHTML = (readiness.warnings || [])
+    .map((warning) => `<div class="notice">${escapeHtml(warning)}</div>`).join('');
+  const body = $('#dataset-classes');
+  if (!readiness.classes?.length) {
+    body.innerHTML = '<tr><td colspan="6" class="muted">还没有已审核并且带可用矩形框的类别。</td></tr>';
+  } else {
+    body.innerHTML = readiness.classes.map((row) => {
+      const checked = readiness.default_classes.includes(row.class_id) ? ' checked' : '';
+      const disabled = row.box_ready_events < readiness.gates.train ? ' disabled' : '';
+      const className = row.gate === 'insufficient' ? 'insufficient' : row.gate;
+      return `
+        <tr>
+          <td><input type="checkbox" value="${row.class_id}"${checked}${disabled} aria-label="选择 ${escapeHtml(row.name || row.label)}"></td>
+          <td><strong>${escapeHtml(row.name || row.label)}</strong><br><span class="muted">${escapeHtml(row.label)}</span></td>
+          <td>${escapeHtml(row.rarity)}</td>
+          <td>${row.events}</td>
+          <td>${row.box_ready_events}</td>
+          <td><span class="gate ${className}">${className}</span></td>
+        </tr>`;
+    }).join('');
+  }
+  updateDatasetSelection();
+}
+
+function renderDatasetHistory(items) {
+  state.datasets = items || [];
+  $('#dataset-versions').textContent = state.datasets.length;
+  const container = $('#dataset-history');
+  if (!state.datasets.length) {
+    container.className = 'dataset-history empty';
+    container.textContent = '尚未构建数据集';
+    return;
+  }
+  container.className = 'dataset-history';
+  container.innerHTML = state.datasets.map((item) => {
+    const stats = item.stats || {};
+    const classes = (item.classes || []).map((row) => row.label).join(', ');
+    return `
+      <div class="version-card">
+        <strong>${escapeHtml(item.version)}</strong>
+        <span>${stats.images || 0} 图 · ${stats.boxes || 0} 框 · ${escapeHtml(JSON.stringify(stats.per_split || {}))}</span><br>
+        <span>${escapeHtml(classes)}</span>
+        <code>${escapeHtml(item.path)}</code>
+      </div>`;
+  }).join('');
+}
+
+async function loadDatasetPage() {
+  try {
+    const [readiness, history] = await Promise.all([
+      api('/api/dataset/readiness'),
+      api('/api/datasets'),
+    ]);
+    renderDatasetReadiness(readiness);
+    renderDatasetHistory(history.items);
+  } catch (error) {
+    toast(`读取数据集状态失败：${error.message}`);
+  }
+}
+
 $$('.step').forEach((button) => {
   button.addEventListener('click', () => {
     switchPage(button.dataset.page);
     if (button.dataset.page === 'review') loadReviewQueue(true);
+    if (button.dataset.page === 'dataset') loadDatasetPage();
   });
 });
 $('#scan-button').addEventListener('click', scan);
@@ -356,6 +440,7 @@ $('#next-action').addEventListener('click', () => {
     loadReviewQueue(true);
   } else {
     switchPage('dataset');
+    loadDatasetPage();
   }
 });
 
@@ -406,6 +491,21 @@ $('#copy-label-folder').addEventListener('click', async () => {
     toast(`请手动复制：${state.labelPackage.folder}`);
   }
 });
+$('#import-label').addEventListener('click', async () => {
+  if (!state.reviewEvent) return;
+  try {
+    const result = await api(`/api/events/${encodeURIComponent(state.reviewEvent.id)}/import-label`, {
+      method: 'POST',
+    });
+    state.reviewEvent = result.event;
+    toast(`已导入 ${result.imported} 张人工标注。`);
+    await refreshStatus();
+    await loadReviewQueue(false);
+    await selectReviewEvent(result.event.id);
+  } catch (error) {
+    toast(`导入失败：${error.message}`);
+  }
+});
 $('#save-xany').addEventListener('click', async () => {
   try {
     await api('/api/xany/config', {
@@ -423,6 +523,34 @@ $('#launch-xany').addEventListener('click', async () => {
     toast('已启动 X-AnyLabeling。生成目录后，在程序中选择该目录。');
   } catch (error) {
     toast(`启动失败：${error.message}`);
+  }
+});
+$('#refresh-dataset').addEventListener('click', loadDatasetPage);
+$('#dataset-classes').addEventListener('change', updateDatasetSelection);
+$('#select-eligible').addEventListener('click', () => {
+  const ready = new Set(state.datasetReadiness?.default_classes || []);
+  $$('#dataset-classes input[type="checkbox"]').forEach((input) => {
+    input.checked = ready.has(Number(input.value));
+  });
+  updateDatasetSelection();
+});
+$('#build-dataset').addEventListener('click', async () => {
+  const classIds = selectedDatasetClasses();
+  if (!classIds.length) {
+    toast('请至少选择一个类别。');
+    return;
+  }
+  $('#build-dataset').disabled = true;
+  try {
+    const result = await api('/api/datasets/build', {
+      method: 'POST',
+      body: JSON.stringify({ class_ids: classIds }),
+    });
+    toast(`数据集 ${result.version} 已生成。`);
+    await loadDatasetPage();
+  } catch (error) {
+    toast(`构建失败：${error.message}`);
+    updateDatasetSelection();
   }
 });
 

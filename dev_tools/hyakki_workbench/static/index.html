@@ -143,6 +143,7 @@
             <p id="label-folder" class="path-output">尚未生成</p>
             <div class="inline-actions">
               <button id="copy-label-folder" class="text-button" disabled>复制路径</button>
+              <button id="import-label" class="text-button">导入标注结果</button>
               <button id="launch-xany" class="text-button">启动程序</button>
               <a href="https://github.com/CVHub520/X-AnyLabeling" target="_blank" rel="noreferrer">官方仓库</a>
             </div>
@@ -156,11 +157,44 @@
       </div>
     </section>
     <section id="page-dataset" class="page">
-      <article class="panel placeholder">
-        <p class="eyebrow">DATASET</p>
-        <h2>数据集页</h2>
-        <p>将人工真值、弱标签和负样本按局拆成不可变 train / val / test 版本。</p>
-      </article>
+      <div class="review-header">
+        <div>
+          <p class="eyebrow">IMMUTABLE DATASET</p>
+          <h2>生成数据集版本</h2>
+          <p class="hint">按整局拆分，同一局的全部帧不会跨 train / val / test。达到 20 个独立事件的类别默认可参加首次试训。</p>
+        </div>
+        <button id="refresh-dataset" class="button">刷新统计</button>
+      </div>
+      <div class="metrics dataset-metrics">
+        <article><span>已审核事件</span><strong id="dataset-reviewed">—</strong></article>
+        <article><span>可拆分局组</span><strong id="dataset-groups">—</strong></article>
+        <article><span>达标类别</span><strong id="dataset-eligible">—</strong></article>
+        <article><span>历史版本</span><strong id="dataset-versions">—</strong></article>
+      </div>
+      <div class="dataset-layout">
+        <article class="panel">
+          <div class="panel-title">
+            <h3>类别样本门槛</h3>
+            <button id="select-eligible" class="text-button">只选达标类别</button>
+          </div>
+          <p class="muted small">20 次可试训，50 次可进入 assist，100 次可考虑 primary。计数单位是独立目标出现事件，不是连续帧。</p>
+          <div id="dataset-warnings" class="notice-list"></div>
+          <div class="table-scroll">
+            <table class="class-table">
+              <thead><tr><th>选择</th><th>式神</th><th>稀有度</th><th>事件</th><th>可用框</th><th>阶段</th></tr></thead>
+              <tbody id="dataset-classes"><tr><td colspan="6" class="muted">正在读取…</td></tr></tbody>
+            </table>
+          </div>
+          <div class="build-footer">
+            <span id="dataset-selection" class="muted small">未选择类别</span>
+            <button id="build-dataset" class="button primary">构建不可变版本</button>
+          </div>
+        </article>
+        <article class="panel">
+          <h3>历史版本</h3>
+          <div id="dataset-history" class="dataset-history empty">尚未构建数据集</div>
+        </article>
+      </div>
     </section>
     <section id="page-training" class="page">
       <article class="panel placeholder">

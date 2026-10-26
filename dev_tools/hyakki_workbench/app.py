@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from .paths import WorkspacePaths
 from .store import WorkbenchStore
+from .dataset import DatasetBuilder
 
 
 class ReviewRequest(BaseModel):
@@ -27,6 +28,10 @@ class ReviewRequest(BaseModel):
 
 class XAnyConfigRequest(BaseModel):
     executable: str = ''
+
+
+class DatasetBuildRequest(BaseModel):
+    class_ids: list[int] | None = None
 
 
 def create_app(paths: WorkspacePaths | None = None) -> FastAPI:
@@ -134,6 +139,16 @@ def create_app(paths: WorkspacePaths | None = None) -> FastAPI:
             except KeyError as exception:
                 raise HTTPException(status_code=404, detail='事件不存在') from exception
 
+    @app.post('/api/events/{event_id}/import-label')
+    def import_label(event_id: str) -> dict:
+        with open_store() as catalog:
+            try:
+                return catalog.import_label_package(event_id)
+            except KeyError as exception:
+                raise HTTPException(status_code=404, detail='事件不存在') from exception
+            except ValueError as exception:
+                raise HTTPException(status_code=422, detail=str(exception)) from exception
+
     @app.get('/api/classes')
     def classes(
         query: str = '',
@@ -142,6 +157,24 @@ def create_app(paths: WorkspacePaths | None = None) -> FastAPI:
     ) -> dict:
         with open_store() as catalog:
             return {'items': catalog.list_classes(query=query, rarity=rarity, limit=limit)}
+
+    @app.get('/api/dataset/readiness')
+    def dataset_readiness() -> dict:
+        with open_store() as catalog:
+            return DatasetBuilder(catalog).readiness()
+
+    @app.get('/api/datasets')
+    def datasets() -> dict:
+        with open_store() as catalog:
+            return {'items': DatasetBuilder(catalog).list_datasets()}
+
+    @app.post('/api/datasets/build')
+    def build_dataset(request: DatasetBuildRequest) -> dict:
+        with open_store() as catalog:
+            try:
+                return DatasetBuilder(catalog).build(request.class_ids)
+            except ValueError as exception:
+                raise HTTPException(status_code=422, detail=str(exception)) from exception
 
     @app.get('/api/xany')
     def xany_config() -> dict:
