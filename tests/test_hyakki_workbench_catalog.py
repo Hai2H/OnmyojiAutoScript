@@ -313,6 +313,51 @@ class WorkbenchCatalogTest(unittest.TestCase):
         self.assertEqual(publisher.active()['model_version'], 'model-test')
         self.assertTrue(publisher.list_models()[0]['active'])
 
+    def test_raw_frame_batch_round_trip(self) -> None:
+        bean_root = self.root / 'bean_capture'
+        round_root = bean_root / 'round_batch'
+        (round_root / 'raw').mkdir(parents=True)
+        rows = []
+        for index in (1, 2):
+            frame = f'frame_{index:06d}'
+            (round_root / 'raw' / f'{frame}.jpg').write_bytes(f'image-{index}'.encode())
+            rows.append({'frame': frame, 'tracks': []})
+        (round_root / 'frames.jsonl').write_text(
+            '\n'.join(json.dumps(row) for row in rows) + '\n',
+            encoding='utf-8',
+        )
+        store = WorkbenchStore.open(self.paths(bean_root, self.root / 'boss_capture'))
+        try:
+            store.scan()
+            frame_ids = [
+                'raw:bean:round_batch:frame_000001',
+                'raw:bean:round_batch:frame_000002',
+            ]
+            for frame_id in frame_ids:
+                store.mark_raw_frame(frame_id, 'candidate')
+            batch = store.prepare_raw_batch()
+            self.assertEqual(batch['items'], 2)
+            self.assertTrue((Path(batch['folder']) / 'classes.txt').is_file())
+
+            for frame_id in frame_ids:
+                safe = frame_id.split(':')[-1]
+                annotation = Path(batch['folder']) / f'round_batch__{safe}.json'
+                payload = json.loads(annotation.read_text(encoding='utf-8'))
+                payload['shapes'] = [{
+                    'label': 'sp_051 百羽凤凰火',
+                    'points': [[10, 20], [100, 160]],
+                    'shape_type': 'rectangle',
+                }]
+                annotation.write_text(json.dumps(payload), encoding='utf-8')
+
+            result = store.import_raw_batch()
+            self.assertEqual(result['imported_frames'], 2)
+            self.assertEqual(result['imported_shapes'], 2)
+            self.assertEqual(store.list_raw_frames(filter_name='candidate')['total'], 0)
+            self.assertEqual(store.list_raw_frames(filter_name='annotated')['total'], 2)
+        finally:
+            store.close()
+
     def test_publish_gate_requires_every_class_precision_and_recall(self) -> None:
         run_dir = self.root / 'train'
         run_dir.mkdir()

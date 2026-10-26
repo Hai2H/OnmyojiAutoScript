@@ -120,6 +120,18 @@
         <span><kbd>0</kbd> 跳过</span>
         <span><kbd>←</kbd><kbd>→</kbd> 浏览</span>
       </div>
+      <div class="batch-strip">
+        <div>
+          <strong>批量标注</strong>
+          <span id="scan-batch-summary">尚未生成批量目录</span>
+          <p id="scan-batch-path" class="batch-path">先把需要补框的帧标记为“需要补框”，再生成一个统一目录。</p>
+        </div>
+        <div class="inline-actions">
+          <button id="scan-batch-prepare" class="button primary">生成批量目录</button>
+          <button id="scan-batch-open" class="button">打开目录</button>
+          <button id="scan-batch-import" class="button">导入全部人工框</button>
+        </div>
+      </div>
       <div class="scan-layout">
         <article class="panel scan-gallery-panel">
           <div id="scan-grid" class="scan-grid empty">扫描采集数据后显示缩略图</div>

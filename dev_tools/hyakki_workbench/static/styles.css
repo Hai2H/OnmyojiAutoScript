@@ -516,6 +516,21 @@ main { max-width: 1450px; margin: 0 auto; padding: 28px clamp(20px, 4vw, 64px) 7
   font-size: 11px;
 }
 .scan-shortcuts span { display: inline-flex; align-items: center; gap: 5px; }
+.batch-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid #38524d;
+  border-radius: 11px;
+  background: linear-gradient(90deg, rgba(31, 75, 62, .34), rgba(19, 26, 33, .85));
+}
+.batch-strip > div:first-child { display: grid; gap: 4px; }
+.batch-strip strong { font-size: 12px; }
+.batch-strip span { color: var(--muted); font-size: 11px; }
+.batch-path { margin: 0; color: #a6b7c5; font: 10px Consolas, monospace; overflow-wrap: anywhere; }
 kbd {
   min-width: 20px;
   padding: 2px 5px;
@@ -680,6 +695,7 @@ kbd {
   .scan-layout { grid-template-columns: 1fr; }
   .scan-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .scan-detail { position: static; }
+  .batch-strip { align-items: flex-start; flex-direction: column; }
   .review-queue, .review-actions { max-height: none; }
   .review-list { max-height: 320px; }
 }

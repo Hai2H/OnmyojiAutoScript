@@ -164,6 +164,38 @@ def create_app(paths: WorkspacePaths | None = None) -> FastAPI:
         with open_store() as catalog:
             return {'items': catalog.raw_frame_rounds()}
 
+    @app.get('/api/raw-frames/batch')
+    def raw_frame_batch() -> dict:
+        with open_store() as catalog:
+            return catalog.batch_status()
+
+    @app.post('/api/raw-frames/batch/prepare')
+    def prepare_raw_frame_batch() -> dict:
+        with open_store() as catalog:
+            return catalog.prepare_raw_batch()
+
+    @app.post('/api/raw-frames/batch/import')
+    def import_raw_frame_batch() -> dict:
+        with open_store() as catalog:
+            try:
+                return catalog.import_raw_batch()
+            except ValueError as exception:
+                raise HTTPException(status_code=422, detail=str(exception)) from exception
+
+    @app.post('/api/raw-frames/batch/open-folder')
+    def open_raw_frame_batch() -> dict:
+        folder = workspace.state_root / 'scan_batch' / 'current'
+        if not folder.is_dir():
+            raise HTTPException(status_code=422, detail='请先生成批量标注目录')
+        try:
+            if os.name == 'nt':
+                os.startfile(str(folder))
+            else:
+                subprocess.Popen(['xdg-open', str(folder)])
+        except OSError as exception:
+            raise HTTPException(status_code=500, detail=f'打开目录失败：{exception}') from exception
+        return {'ok': True, 'folder': str(folder)}
+
     @app.get('/api/raw-frames/{frame_id}')
     def raw_frame_detail(frame_id: str) -> dict:
         with open_store() as catalog:

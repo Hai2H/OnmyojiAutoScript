@@ -23,6 +23,7 @@ const state = {
   scanPackage: null,
   scanItems: [],
   scanTotal: 0,
+  scanBatch: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -179,6 +180,7 @@ async function scan() {
     toast(`扫描完成：${result.events_upserted} 个事件，${result.high_rarity_events} 个高稀有度`);
     await refreshStatus();
     if ($('#page-capture').classList.contains('active')) await loadCapturePage();
+    if ($('#page-scan').classList.contains('active')) await Promise.all([loadScanFrames(), refreshScanBatch()]);
   } catch (error) {
     toast(`扫描失败：${error.message}`);
     await refreshStatus();
@@ -386,6 +388,7 @@ async function markScanFrame(action, { advance = false, prepare = false } = {}) 
       state.scanPackage = packageInfo;
     }
     await loadScanFrames();
+    await refreshScanBatch();
     toast(`已标记为：${scanStatusLabels[frame.review_status]}`);
     if (advance) {
       const target = state.scanItems.find((item) => item.id === nextId) || state.scanItems[0];
@@ -427,10 +430,26 @@ async function moveScan(direction) {
   toast(direction > 0 ? '已经是最后一帧。' : '已经是第一帧。');
 }
 
+async function refreshScanBatch() {
+  try {
+    const status = await api('/api/raw-frames/batch');
+    state.scanBatch = status;
+    $('#scan-batch-summary').textContent =
+      `${status.candidate_frames} 个需要补框 · 批量目录 ${status.items} 帧 · 已保存 ${status.existing_annotations} 个 JSON`;
+    $('#scan-batch-path').textContent = status.items
+      ? `${status.folder}  |  类别：${status.classes}`
+      : '先把需要补框的帧标记为“需要补框”，再生成一个统一目录。';
+    $('#scan-batch-open').disabled = !status.items;
+    $('#scan-batch-import').disabled = !status.items;
+  } catch (error) {
+    toast(`读取批量标注状态失败：${error.message}`);
+  }
+}
+
 async function loadScanPage() {
   try {
     await loadScanRounds();
-    await loadScanFrames();
+    await Promise.all([loadScanFrames(), refreshScanBatch()]);
   } catch (error) {
     toast(`读取盲扫页失败：${error.message}`);
   }
@@ -1171,7 +1190,7 @@ $('#scan-next').addEventListener('click', () => {
   state.scanOffset += state.scanLimit;
   loadScanFrames();
 });
-$('#scan-candidate').addEventListener('click', () => markScanFrame('candidate', { advance: true, prepare: true }));
+$('#scan-candidate').addEventListener('click', () => markScanFrame('candidate', { advance: true }));
 $('#scan-not-new').addEventListener('click', () => markScanFrame('no_action', { advance: true }));
 $('#scan-reset').addEventListener('click', () => markScanFrame('reset'));
 $('#scan-prepare').addEventListener('click', async () => {
@@ -1227,9 +1246,46 @@ $('#scan-import').addEventListener('click', async () => {
       method: 'POST',
     });
     renderScanDetail(result.frame);
+    await refreshScanBatch();
     toast(`已导入 ${result.imported} 个人工框。`);
   } catch (error) {
     toast(`导入失败：${error.message}`);
+  }
+});
+$('#scan-batch-prepare').addEventListener('click', async () => {
+  try {
+    const result = await api('/api/raw-frames/batch/prepare', { method: 'POST' });
+    state.scanBatch = result;
+    await refreshScanBatch();
+    toast(`批量目录已生成：${result.items} 帧，新建 ${result.created_annotations} 个预标注。`);
+  } catch (error) {
+    toast(`生成批量目录失败：${error.message}`);
+  }
+});
+$('#scan-batch-open').addEventListener('click', async () => {
+  try {
+    await api('/api/raw-frames/batch/open-folder', { method: 'POST' });
+    toast('已在文件资源管理器中打开批量标注目录。');
+  } catch (error) {
+    toast(`打开目录失败：${error.message}`);
+  }
+});
+$('#scan-batch-import').addEventListener('click', async () => {
+  try {
+    const result = await api('/api/raw-frames/batch/import', { method: 'POST' });
+    toast(`批量回导完成：${result.imported_frames} 帧、${result.imported_shapes} 个框。`);
+    await Promise.all([loadScanFrames(), refreshScanBatch(), refreshStatus()]);
+    const currentStillVisible = state.scanCurrent
+      && state.scanItems.some((item) => item.id === state.scanCurrent.id);
+    if (!currentStillVisible) {
+      if (state.scanItems.length) {
+        await selectScanFrame(state.scanItems[0].id);
+      } else {
+        clearScanSelection();
+      }
+    }
+  } catch (error) {
+    toast(`批量回导失败：${error.message}`);
   }
 });
 $('#scan-image').addEventListener('load', renderScanBoxes);
@@ -1242,7 +1298,7 @@ document.addEventListener('keydown', (event) => {
     markScanFrame('no_action', { advance: true });
   } else if (event.key === '2') {
     event.preventDefault();
-    markScanFrame('candidate', { advance: true, prepare: true });
+    markScanFrame('candidate', { advance: true });
   } else if (event.key === '0') {
     event.preventDefault();
     markScanFrame('skip', { advance: true });

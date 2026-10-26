@@ -943,6 +943,37 @@ class Catalog:
         self.connection.commit()
         return self.get_raw_frame(frame_id)
 
+    def _raw_prelabel_payload(self, frame: dict, image_name: str) -> dict:
+        shapes = []
+        for track in frame.get('tracks') or []:
+            class_id = self._class_id_from_xany_label(track.get('label'))
+            row = self.class_table.get(class_id, {}) if class_id is not None else {}
+            if not row:
+                continue
+            label = f"{row['label']} {row['name']}"
+            box = track['box']
+            shapes.append({
+                'label': label,
+                'points': [[box['x1'], box['y1']], [box['x2'], box['y2']]],
+                'group_id': None,
+                'shape_type': 'rectangle',
+                'flags': {'source': 'old_model'},
+                'description': '旧模型预标注，可能是错误类别；漏检目标需手动补框',
+            })
+        return {
+            'version': '4.1.1',
+            'flags': {
+                'model_suggestion': True,
+                'reviewed': False,
+                'workbench_raw_frame': frame['id'],
+            },
+            'shapes': shapes,
+            'imagePath': image_name,
+            'imageData': None,
+            'imageHeight': frame.get('image_height'),
+            'imageWidth': frame.get('image_width'),
+        }
+
     def prepare_raw_label_package(self, frame_id: str) -> dict:
         self._ensure_class_table()
         frame = self.get_raw_frame(frame_id)
@@ -968,35 +999,7 @@ class Catalog:
                 shutil.copy2(source, image_target)
         annotation_path = image_target.with_suffix('.json')
         if not annotation_path.exists():
-            shapes = []
-            for track in frame.get('tracks') or []:
-                class_id = self._class_id_from_xany_label(track.get('label'))
-                row = self.class_table.get(class_id, {}) if class_id is not None else {}
-                if not row:
-                    continue
-                label = f"{row['label']} {row['name']}"
-                box = track['box']
-                shapes.append({
-                    'label': label,
-                    'points': [[box['x1'], box['y1']], [box['x2'], box['y2']]],
-                    'group_id': None,
-                    'shape_type': 'rectangle',
-                    'flags': {'source': 'old_model'},
-                    'description': '旧模型预标注，可能是错误类别；漏检目标需手动补框',
-                })
-            payload = {
-                'version': '4.1.1',
-                'flags': {
-                    'model_suggestion': True,
-                    'reviewed': False,
-                    'workbench_raw_frame': frame_id,
-                },
-                'shapes': shapes,
-                'imagePath': image_name,
-                'imageData': None,
-                'imageHeight': frame.get('image_height'),
-                'imageWidth': frame.get('image_width'),
-            }
+            payload = self._raw_prelabel_payload(frame, image_name)
             annotation_path.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=1),
                 encoding='utf-8',
@@ -1020,6 +1023,16 @@ class Catalog:
         if not annotations:
             raise ValueError('尚未生成或保存 X-AnyLabeling 标注')
         payload = _read_json(annotations[0], {}) or {}
+        imported = self._save_raw_annotations(frame_id, payload)
+        if not imported:
+            raise ValueError('标注结果中没有可用类别和矩形框')
+        return {
+            'frame': self.get_raw_frame(frame_id),
+            'imported': imported,
+        }
+
+    def _save_raw_annotations(self, frame_id: str, payload: dict) -> int:
+        """Persist valid rectangles and mark the frame annotated."""
         imported = []
         now = _now()
         for shape in payload.get('shapes') or []:
@@ -1030,7 +1043,7 @@ class Catalog:
                 continue
             imported.append((int(class_id), self.class_table[class_id]['label'], box))
         if not imported:
-            raise ValueError('标注结果中没有可用类别和矩形框')
+            return 0
         self.connection.execute('DELETE FROM manual_shapes WHERE frame_id=?', (frame_id,))
         for class_id, label, box in imported:
             self.connection.execute(
@@ -1045,9 +1058,123 @@ class Catalog:
             (now, frame_id),
         )
         self.connection.commit()
+        return len(imported)
+
+    @property
+    def raw_batch_folder(self) -> Path:
+        return self.paths.state_root / 'scan_batch' / 'current'
+
+    def batch_status(self) -> dict:
+        manifest = _read_json(self.raw_batch_folder / 'manifest.json', {}) or {}
+        items = manifest.get('items') or []
+        pending = self.connection.execute(
+            "SELECT COUNT(*) FROM raw_frames WHERE review_status='candidate'"
+        ).fetchone()[0]
+        annotated = self.connection.execute(
+            "SELECT COUNT(*) FROM raw_frames WHERE review_status='annotated'"
+        ).fetchone()[0]
+        existing = sum(
+            1 for item in items
+            if (self.raw_batch_folder / item['annotation']).is_file()
+        )
         return {
-            'frame': self.get_raw_frame(frame_id),
-            'imported': len(imported),
+            'folder': str(self.raw_batch_folder),
+            'classes': str(self.raw_batch_folder / 'classes.txt'),
+            'manifest': str(self.raw_batch_folder / 'manifest.json'),
+            'items': len(items),
+            'existing_annotations': existing,
+            'candidate_frames': pending,
+            'annotated_frames': annotated,
+            'generated_at': manifest.get('generated_at'),
+        }
+
+    def prepare_raw_batch(self) -> dict:
+        self._ensure_class_table()
+        folder = self.raw_batch_folder
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / 'classes.txt').write_text(
+            '\n'.join(
+                f"{row['label']} {row['name']}"
+                for _, row in sorted(self.class_table.items())
+            ) + '\n',
+            encoding='utf-8',
+        )
+        rows = self.connection.execute(
+            "SELECT * FROM raw_frames WHERE review_status='candidate' "
+            'ORDER BY round_id, frame_key'
+        ).fetchall()
+        manifest_items = []
+        created = 0
+        for row in rows:
+            frame = self._raw_frame_payload(row)
+            safe_round = frame['round_id'].replace(' ', '_').replace('/', '_')
+            safe_frame = frame['frame_key'].replace(' ', '_').replace('/', '_')
+            source = Path(frame['image_path'])
+            image_name = f'{safe_round}__{safe_frame}{source.suffix.lower() or ".jpg"}'
+            image_target = folder / image_name
+            if not image_target.exists():
+                try:
+                    os.link(source, image_target)
+                except OSError:
+                    shutil.copy2(source, image_target)
+            annotation = image_target.with_suffix('.json')
+            if not annotation.exists():
+                annotation.write_text(
+                    json.dumps(
+                        self._raw_prelabel_payload(frame, image_name),
+                        ensure_ascii=False,
+                        indent=1,
+                    ),
+                    encoding='utf-8',
+                )
+                created += 1
+            manifest_items.append({
+                'frame_id': frame['id'],
+                'image': image_name,
+                'annotation': annotation.name,
+                'round_id': frame['round_id'],
+                'frame_key': frame['frame_key'],
+            })
+        manifest = {
+            'schema_version': 1,
+            'generated_at': _now(),
+            'folder': str(folder),
+            'items': manifest_items,
+        }
+        (folder / 'manifest.json').write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=1),
+            encoding='utf-8',
+        )
+        return {
+            **self.batch_status(),
+            'created_annotations': created,
+        }
+
+    def import_raw_batch(self) -> dict:
+        manifest = _read_json(self.raw_batch_folder / 'manifest.json', {})
+        if not isinstance(manifest, dict):
+            raise ValueError('尚未生成批量标注目录')
+        imported_frames = 0
+        imported_shapes = 0
+        skipped = []
+        for item in manifest.get('items') or []:
+            frame_id = item.get('frame_id')
+            annotation_path = self.raw_batch_folder / item.get('annotation', '')
+            payload = _read_json(annotation_path, None)
+            if not isinstance(payload, dict):
+                skipped.append({'frame_id': frame_id, 'reason': 'missing_annotation'})
+                continue
+            shape_count = self._save_raw_annotations(frame_id, payload)
+            if shape_count:
+                imported_frames += 1
+                imported_shapes += shape_count
+            else:
+                skipped.append({'frame_id': frame_id, 'reason': 'no_valid_shapes'})
+        return {
+            'imported_frames': imported_frames,
+            'imported_shapes': imported_shapes,
+            'skipped': skipped,
+            'status': self.batch_status(),
         }
 
     def manual_shapes(self, frame_id: str | None = None) -> list[dict]:
