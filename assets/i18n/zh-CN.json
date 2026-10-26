@@ -182,5 +182,7 @@
   "hya_detector_timeout_ms": "YOLO11 服务超时(ms)",
   "hya_detector_timeout_ms_help": "本地 GPU 推理超时后，当前帧自动继续使用旧模型。",
   "hya_detector_log": "记录新旧模型旁路统计",
-  "hya_detector_log_help": "每秒最多写一条合并数量，保存在 log/hyakkiyakou/detector_router.jsonl。"
+  "hya_detector_log_help": "每秒最多写一条合并数量，保存在 log/hyakkiyakou/detector_router.jsonl。",
+  "hya_ur": "UR 权重",
+  "hya_ur_help": "新模型识别出 UR 时用于焦点评分的权重，默认高于 SP。"
 }

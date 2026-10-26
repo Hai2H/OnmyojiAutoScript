@@ -47,6 +47,7 @@ class HyakkiyakouConfig(ConfigBase):
     hya_sr: float = Field(default=0.7, description='hya_sr_help')
     hya_r: float = Field(default=0.3, description='hya_r_help')
     hya_n: float = Field(default=0.0, description='hya_n_help')
+    hya_ur: float = Field(default=1.5, description='hya_ur_help')
     # 呱太和N卡不是一个东西
     hya_g: float = Field(default=0.0, description='hya_g_help')
 

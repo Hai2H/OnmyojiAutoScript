@@ -9,11 +9,11 @@ from numpy import uint8, fromfile
 from cached_property import cached_property
 
 from oashya.tracker import Tracker
-from oashya.labels import CLASSINDEX as CI
-from oashya.labels import id2label, id2name
+from oashya.labels import id2name
 from module.logger import logger
 from tasks.Hyakkiyakou.agent.focus import Focus
 from tasks.Hyakkiyakou.debugger import Debugger
+from tasks.Hyakkiyakou.shikigami_table import SHIKIGAMI_TABLE
 
 
 def generate_gaussian_patch(size=(300, 300), mean=0, std_dev=60):
@@ -84,7 +84,7 @@ class Agent:
               priorities: list[int] = []) -> np.ndarray:
         """
         @param tracks:
-        @param weights: sp, ssr, sr, r, n, g
+        @param weights: sp, ssr, sr, r, n, g, ur
         @param priorities:
         @return:
         """
@@ -92,18 +92,27 @@ class Agent:
         for _id, _class, _conf, _cx, _cy, _w, _h, _v in tracks:
             weight = 1.
             mu = 0.8 + (_cx * 0.2) / 1280
-            match _class:
-                case _ if CI.MIN_G <= _class <= CI.MAX_G: weight = weights[5]
-                case _ if CI.MIN_N <= _class <= CI.MAX_N: weight = weights[4]
-                case _ if _class != CI.R_008 and _class != CI.R_007 and (CI.MIN_R <= _class <= CI.MAX_R):
-                    weight = weights[3]  # 不要童男童女
-                case _ if CI.MIN_SR <= _class <= CI.MAX_SR: weight = weights[2]
-                case _ if CI.MIN_SSR <= _class <= CI.MAX_SSR: weight = 1.5 * weights[1]
-                case _ if CI.MIN_SP <= _class <= CI.MAX_SP: weight = 1.5 * weights[0]
-                # case CI.BUFF_005:  # freeze
-                #     weight = -1.
-                #     _cy += 100
-                case _: continue
+            row = SHIKIGAMI_TABLE.get(int(_class))
+            if row is None:
+                continue
+            rarity = row['rarity']
+            if rarity == 'G':
+                weight = weights[5]
+            elif rarity == 'N':
+                weight = weights[4]
+            elif rarity == 'R':
+                # 童男/童女没有可获取碎片，保留原有排除行为。
+                weight = 0. if row['label'] in {'r_007', 'r_008'} else weights[3]
+            elif rarity == 'SR':
+                weight = weights[2]
+            elif rarity == 'SSR':
+                weight = 1.5 * weights[1]
+            elif rarity == 'SP':
+                weight = 1.5 * weights[0]
+            elif rarity == 'UR':
+                weight = 1.5 * (weights[6] if len(weights) > 6 else weights[0])
+            else:
+                continue
             for priority in priorities:  # 我的代码在你之上
                 if priority == _class:
                     weight = 1.7
@@ -154,7 +163,8 @@ class Agent:
             self.focus = None
             return
         if self.focus is None or self.focus != focus:
-            logger.info(f'Focus changed, now: {id2name(focus._class)}')
+            row = SHIKIGAMI_TABLE.get(int(focus._class), {})
+            logger.info(f"Focus changed, now: {row.get('name') or id2name(focus._class)}")
             self.focus = focus
             self.focus.set_omega(omega)
         elif self.focus == focus:

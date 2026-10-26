@@ -11,6 +11,19 @@ from oashya.labels import CLASSINDEX as CI
 
 # get buff status
 from tasks.Hyakkiyakou.slave.hya_slave import HyaBuff
+from tasks.Hyakkiyakou.shikigami_table import SHIKIGAMI_TABLE
+
+
+def is_high_rarity(class_id: int) -> bool:
+    return SHIKIGAMI_TABLE.get(int(class_id), {}).get('rarity') in {'SSR', 'SP', 'UR'}
+
+
+def display_label(class_id: int) -> str:
+    return SHIKIGAMI_TABLE.get(int(class_id), {}).get('label') or id2label(class_id)
+
+
+def display_name(class_id: int) -> str:
+    return SHIKIGAMI_TABLE.get(int(class_id), {}).get('name') or id2name(class_id)
 
 
 class Focus:
@@ -34,8 +47,8 @@ class Focus:
         return f"""
 id: {self._id}
 class: {self._class}
-label: {id2label(self._class)}
-name: {id2name(self._class)}
+label: {display_label(self._class)}
+name: {display_name(self._class)}
 conf: {self._conf}
 xywh: ({self._cx}, {self._cy}, {self._w}, {self._h})
 velocity: {self._v}"""
@@ -56,8 +69,8 @@ velocity: {self._v}"""
         table.add_column("Value", style="green")
         table.add_row('id', str(self._id), 'conf', str(self._conf))
         table.add_row('class', str(self._class), 'xywh', f'({self._cx}, {self._cy}, {self._w}, {self._h})')
-        table.add_row('label', id2label(self._class), 'velocity', str(self._v))
-        table.add_row('name', f'{id2name(self._class)}', 'omega', str(self._omega))
+        table.add_row('label', display_label(self._class), 'velocity', str(self._v))
+        table.add_row('name', display_name(self._class), 'omega', str(self._omega))
         logger.print(table, justify='center')
 
     def update(self, focus):
@@ -88,9 +101,7 @@ velocity: {self._v}"""
 
         # ========= 新增：利用和 gamma() 一样的区间判断当前“打的对象”是不是 SSR/SP =========
         is_rare_ssr_sp = False
-        if CI.MIN_SSR <= target_class <= CI.MAX_SSR and self._omega > buff_omega:
-            is_rare_ssr_sp = True
-        elif CI.MIN_SP <= target_class <= CI.MAX_SP and self._omega > buff_omega:
+        if is_high_rarity(target_class) and self._omega > buff_omega:
             is_rare_ssr_sp = True
         _r = self.r(vector=state, omega=self._omega, omega_buff=self._omega_buff, is_rare_ssr_sp=is_rare_ssr_sp, freeze=freeze, is_buff=buffed)
         throw = True if _r > 0 else False
@@ -104,7 +115,7 @@ velocity: {self._v}"""
         max_v = 0
         max_class = 0
 
-        focus_is_ssr_sp = (CI.MIN_SSR <= self._class <= CI.MAX_SSR or CI.MIN_SP <= self._class <= CI.MAX_SP)
+        focus_is_ssr_sp = is_high_rarity(self._class)
 
         for _id, _class, _conf, _cx, _cy, _w, _h, _v in tracks:
             _current_omega = 0.

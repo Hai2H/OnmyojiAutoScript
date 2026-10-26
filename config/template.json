@@ -1085,6 +1085,7 @@
       "hya_sr": 0.7,
       "hya_r": 0.3,
       "hya_n": 0.0,
+      "hya_ur": 1.5,
       "hya_g": 0.0
     },
     "hyakkiyakou_models": {
