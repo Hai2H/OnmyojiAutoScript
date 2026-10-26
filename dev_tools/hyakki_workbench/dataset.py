@@ -40,6 +40,19 @@ def _gate(count: int) -> str:
     return 'insufficient'
 
 
+def _box_iou(left: dict, right: dict) -> float:
+    x1 = max(float(left['x1']), float(right['x1']))
+    y1 = max(float(left['y1']), float(right['y1']))
+    x2 = min(float(left['x2']), float(right['x2']))
+    y2 = min(float(left['y2']), float(right['y2']))
+    if x2 <= x1 or y2 <= y1:
+        return 0.0
+    intersection = (x2 - x1) * (y2 - y1)
+    left_area = (float(left['x2']) - float(left['x1'])) * (float(left['y2']) - float(left['y1']))
+    right_area = (float(right['x2']) - float(right['x1'])) * (float(right['y2']) - float(right['y1']))
+    return intersection / max(1e-9, left_area + right_area - intersection)
+
+
 class DatasetBuilder:
     def __init__(self, catalog: Catalog):
         self.catalog = catalog
@@ -70,12 +83,34 @@ class DatasetBuilder:
                 missing_box[class_id] += 1
         for shape in manual_shapes:
             manual_frames_by_class[int(shape['class_id'])].add(shape['frame_id'])
+        raw_paths = {
+            row['id']: str(Path(row['image_path']).resolve())
+            for row in self.catalog.connection.execute(
+                'SELECT id, image_path FROM raw_frames'
+            ).fetchall()
+        }
+        manual_boxes_by_image: dict[str, list[dict]] = defaultdict(list)
+        for shape in manual_shapes:
+            image_path = raw_paths.get(shape['frame_id'])
+            if image_path:
+                manual_boxes_by_image[image_path].append(shape['box'])
+        covered_events = set()
+        for event in events:
+            for sample in self._samples_for_event(event):
+                image_path = str(Path(sample['image_path']).resolve())
+                if any(_box_iou(sample['box'], manual) >= .35
+                       for manual in manual_boxes_by_image.get(image_path, [])):
+                    covered_events.add(event['id'])
+                    break
 
         rows = []
         for class_id in set(by_class) | set(manual_frames_by_class):
             members = by_class.get(class_id, [])
             registry = self.catalog.class_table.get(class_id, {})
-            ready = sum(1 for event in members if self._samples_for_event(event))
+            ready = sum(
+                1 for event in members
+                if event['id'] not in covered_events and self._samples_for_event(event)
+            )
             manual_frames = len(manual_frames_by_class.get(class_id, set()))
             ready += manual_frames
             rows.append({
@@ -320,6 +355,24 @@ class DatasetBuilder:
                 'rarity': self.catalog.class_table[class_id]['rarity'],
                 'label': self.catalog.class_table[class_id]['label'],
             })
+
+        manual_boxes_by_image = defaultdict(list)
+        for sample in samples:
+            if sample['label_source'] == 'raw_frame_xanylabeling':
+                manual_boxes_by_image[str(Path(sample['image_path']).resolve())].append(sample['box'])
+        filtered_samples = []
+        for sample in samples:
+            if sample['label_source'] != 'raw_frame_xanylabeling':
+                image_path = str(Path(sample['image_path']).resolve())
+                if any(_box_iou(sample['box'], manual) >= .35
+                       for manual in manual_boxes_by_image.get(image_path, [])):
+                    excluded.append({
+                        'event_id': sample['event_id'],
+                        'reason': 'superseded_by_manual_annotation',
+                    })
+                    continue
+            filtered_samples.append(sample)
+        samples = filtered_samples
 
         if not samples:
             raise ValueError('所选类别没有包含可用图片和矩形框')

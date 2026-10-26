@@ -224,6 +224,10 @@ class WorkbenchCatalogTest(unittest.TestCase):
                 'label': 'sp_051',
                 'points': [[10, 10], [80, 120]],
                 'shape_type': 'rectangle',
+            }, {
+                'label': 'ssr_075',
+                'points': [[50, 65], [82, 115]],
+                'shape_type': 'rectangle',
             }]
             raw_annotation.write_text(json.dumps(raw_payload), encoding='utf-8')
             store.import_raw_label_package(raw_id)
@@ -235,6 +239,7 @@ class WorkbenchCatalogTest(unittest.TestCase):
             self.assertEqual(readiness['manual_frames'], 1)
             event_class = next(row for row in readiness['classes'] if row['label'] == 'ssr_075')
             self.assertEqual(event_class['box_ready_events'], 20)
+            self.assertEqual(event_class['manual_frames'], 1)
             manual_class = next(row for row in readiness['classes'] if row['label'] == 'sp_051')
             self.assertEqual(manual_class['manual_frames'], 1)
 
@@ -243,6 +248,11 @@ class WorkbenchCatalogTest(unittest.TestCase):
             self.assertTrue((target / 'data.yaml').is_file())
             self.assertTrue((target / 'manifest.json').is_file())
             self.assertEqual(result['manifest']['stats']['positive_images'], 20)
+            self.assertEqual(result['manifest']['stats']['manual_positive_images'], 1)
+            self.assertTrue(any(
+                item['reason'] == 'superseded_by_manual_annotation'
+                for item in result['manifest']['excluded']
+            ))
             self.assertEqual(set(result['manifest']['stats']['per_split']), {'train', 'val'})
             self.assertEqual(len(DatasetBuilder(store).list_datasets()), 1)
             data_yaml = (target / 'data.yaml').read_text(encoding='utf-8')

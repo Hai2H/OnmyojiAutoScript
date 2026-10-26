@@ -98,7 +98,7 @@
         <div>
           <p class="eyebrow">RAW FRAME DISCOVERY</p>
           <h2>原始帧盲扫</h2>
-          <p class="hint">旧模型完全漏检的新式神不会进入事件队列，必须从整帧截图中发现。发现后生成标注目录，画框并选择真实类别。</p>
+          <p class="hint">旧模型完全漏检或识别错误的式神不一定进入事件队列，需要从整帧截图中发现。发现后生成标注目录，画框并选择真实类别。</p>
         </div>
         <select id="scan-round" class="plain-select"><option value="">全部局</option></select>
       </div>
@@ -109,7 +109,7 @@
           <button data-scan-filter="empty">空检测</button>
           <button data-scan-filter="low">低置信</button>
           <button data-scan-filter="flip">类别跳变</button>
-          <button data-scan-filter="candidate">疑似新式神</button>
+          <button data-scan-filter="candidate">待补充目标</button>
           <button data-scan-filter="annotated">已标注</button>
         </div>
         <span id="scan-total" class="status-chip">0 帧</span>
@@ -141,12 +141,12 @@
             </div>
             <div id="scan-tags" class="tag-list"></div>
             <div class="row">
-              <button id="scan-candidate" class="action-button warning">标记为疑似新式神</button>
+              <button id="scan-candidate" class="action-button warning">标记为待补充目标</button>
               <button id="scan-not-new" class="action-button">不是新式神</button>
               <button id="scan-reset" class="text-button">恢复未处理</button>
             </div>
             <label for="scan-note" class="field-label">盲扫备注</label>
-            <textarea id="scan-note" rows="2" placeholder="例如：疑似新 SP、被旧模型误认成 SSR 等"></textarea>
+            <textarea id="scan-note" rows="2" placeholder="例如：漏检新 SP、旧 SSR 被认成其他式神等"></textarea>
             <div class="label-package">
               <h3>标注与回导</h3>
               <div class="inline-actions">

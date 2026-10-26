@@ -221,7 +221,7 @@ async function loadCapturePage() {
 
 const scanStatusLabels = {
   unreviewed: '未处理',
-  candidate: '疑似新式神',
+  candidate: '待补充目标',
   not_new: '不是新式神',
   skipped: '已跳过',
   annotated: '已标注',
