@@ -564,6 +564,7 @@ async function loadXanyConfig() {
   try {
     const result = await api('/api/xany');
     $('#xany-executable').value = result.executable || '';
+    $('#scan-xany-executable').value = result.executable || '';
   } catch (_) {
     // Settings are optional until the first configuration attempt.
   }
@@ -1113,6 +1114,18 @@ $('#scan-launch-xany').addEventListener('click', async () => {
     toast('已启动 X-AnyLabeling。请选择刚才打开的标注目录。');
   } catch (error) {
     toast(`启动失败：${error.message}`);
+  }
+});
+$('#scan-save-xany').addEventListener('click', async () => {
+  try {
+    await api('/api/xany/config', {
+      method: 'POST',
+      body: JSON.stringify({ executable: $('#scan-xany-executable').value }),
+    });
+    $('#xany-executable').value = $('#scan-xany-executable').value;
+    toast('X-AnyLabeling 路径已保存。');
+  } catch (error) {
+    toast(`保存失败：${error.message}`);
   }
 });
 $('#scan-import').addEventListener('click', async () => {
