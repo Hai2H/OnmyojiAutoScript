@@ -15,6 +15,7 @@ from PIL import Image
 from .catalog import Catalog, _iter_directories, _iter_frames
 
 
+PILOT_GATE = 5
 TRAIN_GATE = 20
 ASSIST_GATE = 50
 PRIMARY_GATE = 100
@@ -37,6 +38,8 @@ def _gate(count: int) -> str:
         return 'assist'
     if count >= TRAIN_GATE:
         return 'train'
+    if count >= PILOT_GATE:
+        return 'pilot'
     return 'insufficient'
 
 
@@ -141,7 +144,14 @@ class DatasetBuilder:
         }
         groups = {_group_key(event) for event in events}
         groups.update(f'bean:{round_id}' for round_id in manual_rounds)
-        selected_default = [row['class_id'] for row in rows if row['gate'] != 'insufficient']
+        selected_default = [
+            row['class_id'] for row in rows
+            if row['box_ready_events'] >= TRAIN_GATE
+        ]
+        suggested = [
+            row['class_id'] for row in rows
+            if row['box_ready_events'] >= PILOT_GATE
+        ]
         return {
             'reviewed_events': len(events),
             'manual_frames': len({shape['frame_id'] for shape in manual_shapes}),
@@ -150,15 +160,17 @@ class DatasetBuilder:
             'round_groups_detail': sorted(groups),
             'classes': rows,
             'default_classes': selected_default,
+            'suggested_classes': suggested,
             'gates': {
+                'pilot': PILOT_GATE,
                 'train': TRAIN_GATE,
                 'assist': ASSIST_GATE,
                 'primary': PRIMARY_GATE,
             },
-            'can_build': len(groups) >= 2 and bool(rows),
+            'can_build': len(groups) >= 2 and any(row['box_ready_events'] > 0 for row in rows),
             'warnings': [
                 *(['至少需要来自两个不同局的事件才能拆分 train/val。'] if len(groups) < 2 else []),
-                *(['当前没有达标类别，继续审核或降低试训门槛。'] if not selected_default else []),
+                *(['当前没有达到 20 个正式试训门槛的类别。可以选择达到 5 个的实验类别。'] if not selected_default else []),
             ],
         }
 
@@ -273,9 +285,16 @@ class DatasetBuilder:
         except OSError:
             shutil.copy2(source, target)
 
-    def build(self, class_ids: list[int] | None = None) -> dict:
+    def build(
+        self,
+        class_ids: list[int] | None = None,
+        *,
+        allow_below_suggestion: bool = False,
+    ) -> dict:
         readiness = self.readiness()
-        selected = [int(item) for item in (class_ids or readiness['default_classes'])]
+        selected = [int(item) for item in (
+            class_ids or readiness['default_classes'] or readiness['suggested_classes']
+        )]
         if not selected:
             raise ValueError('没有达标类别可训练')
         unknown = [class_id for class_id in selected if class_id not in self.catalog.class_table]
@@ -285,13 +304,20 @@ class DatasetBuilder:
             int(row['class_id']): int(row['box_ready_events'])
             for row in readiness['classes']
         }
-        below_gate = [
+        empty_classes = [
             class_id for class_id in selected
-            if ready_by_class.get(class_id, 0) < TRAIN_GATE
+            if ready_by_class.get(class_id, 0) <= 0
         ]
-        if below_gate:
+        if empty_classes:
+            raise ValueError(f'所选类别没有可用人工框：{empty_classes}')
+        below_suggestion = [
+            class_id for class_id in selected
+            if ready_by_class.get(class_id, 0) < PILOT_GATE
+        ]
+        if below_suggestion and not allow_below_suggestion:
             raise ValueError(
-                f'类别未达到每类 {TRAIN_GATE} 个独立事件门槛：{below_gate}'
+                f'类别低于建议的实验门槛 {PILOT_GATE}：{below_suggestion}；'
+                '如确认进行低样本实验训练，请启用 allow_below_suggestion'
             )
 
         events = [
@@ -383,6 +409,23 @@ class DatasetBuilder:
             | {_group_key(negative) for negative in empty_negatives}
         )
         split_of_group, warnings = self._split_groups(groups)
+        below_train = [
+            self.catalog.class_table[class_id]['label']
+            for class_id in selected
+            if ready_by_class.get(class_id, 0) < TRAIN_GATE
+        ]
+        if below_train:
+            warnings.append(
+                '低样本实验训练：以下类别少于 20 个独立目标，禁止据此宣称生产可用：'
+                + ', '.join(below_train)
+            )
+        if below_suggestion:
+            warnings.append(
+                f'已显式覆盖建议门槛 {PILOT_GATE}，以下类别仅有 1～4 个独立目标：'
+                + ', '.join(
+                    self.catalog.class_table[class_id]['label'] for class_id in below_suggestion
+                )
+            )
 
         local_index = {class_id: index for index, class_id in enumerate(sorted(selected))}
         dataset_root = self.catalog.paths.datasets_root
@@ -520,11 +563,13 @@ class DatasetBuilder:
                 'excluded': excluded,
                 'warnings': warnings,
                 'policy': {
+                    'gate_pilot_suggestion': PILOT_GATE,
                     'gate_train': TRAIN_GATE,
                     'gate_assist': ASSIST_GATE,
                     'gate_primary': PRIMARY_GATE,
                     'split_by_round': True,
                     'max_empty_negatives_per_round': MAX_EMPTY_NEGATIVES_PER_ROUND,
+                    'allow_below_suggestion': allow_below_suggestion,
                 },
             }
             (temporary / 'manifest.json').write_text(

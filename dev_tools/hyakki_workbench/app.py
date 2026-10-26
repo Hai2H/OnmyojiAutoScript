@@ -34,6 +34,7 @@ class XAnyConfigRequest(BaseModel):
 
 class DatasetBuildRequest(BaseModel):
     class_ids: list[int] | None = None
+    allow_below_suggestion: bool = False
 
 
 class TrainingStartRequest(BaseModel):
@@ -322,7 +323,10 @@ def create_app(paths: WorkspacePaths | None = None) -> FastAPI:
     def build_dataset(request: DatasetBuildRequest) -> dict:
         with open_store() as catalog:
             try:
-                return DatasetBuilder(catalog).build(request.class_ids)
+                return DatasetBuilder(catalog).build(
+                    request.class_ids,
+                    allow_below_suggestion=request.allow_below_suggestion,
+                )
             except ValueError as exception:
                 raise HTTPException(status_code=422, detail=str(exception)) from exception
 

@@ -361,6 +361,33 @@ class WorkbenchCatalogTest(unittest.TestCase):
         finally:
             store.close()
 
+    def test_low_sample_training_requires_explicit_override(self) -> None:
+        bean_root = self.root / 'bean_capture'
+        for round_name in ('round_low_a', 'round_low_b'):
+            round_root = bean_root / round_name
+            write_image(round_root / 'raw' / 'frame_000001.jpg')
+            row = {
+                'frame': 'frame_000001',
+                'tracks': [[1, 265, 0.9, 160, 90, 50, 70, 0]],
+            }
+            (round_root / 'frames.jsonl').write_text(
+                json.dumps(row) + '\n',
+                encoding='utf-8',
+            )
+        store = WorkbenchStore.open(self.paths(bean_root, self.root / 'boss_capture'))
+        try:
+            store.scan()
+            store.review_event('bean:round_low_a:1', action='correct')
+            store.review_event('bean:round_low_b:1', action='correct')
+            with self.assertRaisesRegex(ValueError, '低于建议'):
+                DatasetBuilder(store).build([265])
+            result = DatasetBuilder(store).build([265], allow_below_suggestion=True)
+            self.assertTrue(result['manifest']['policy']['allow_below_suggestion'])
+            self.assertEqual(result['manifest']['stats']['positive_images'], 2)
+            self.assertTrue(result['manifest']['warnings'])
+        finally:
+            store.close()
+
     def test_publish_gate_requires_every_class_precision_and_recall(self) -> None:
         run_dir = self.root / 'train'
         run_dir.mkdir()

@@ -685,10 +685,16 @@ function selectedDatasetClasses() {
 
 function updateDatasetSelection() {
   const selected = selectedDatasetClasses();
+  const rows = new Map((state.datasetReadiness?.classes || []).map((item) => [item.class_id, item]));
+  const lowSample = selected.filter((classId) => (rows.get(classId)?.box_ready_events || 0) < 5);
+  const allowBelow = $('#allow-below-suggestion').checked;
   $('#dataset-selection').textContent = selected.length
-    ? `已选择 ${selected.length} 个类别`
+    ? `已选择 ${selected.length} 个类别${lowSample.length ? `，其中 ${lowSample.length} 类低于建议门槛` : ''}`
     : '未选择类别';
-  $('#build-dataset').disabled = !state.datasetReadiness?.can_build || !selected.length;
+  $('#build-dataset').disabled =
+    !state.datasetReadiness?.can_build
+    || !selected.length
+    || (lowSample.length > 0 && !allowBelow);
   $$('#dataset-classes tr').forEach((row) => {
     row.classList.toggle('selected', row.querySelector('input')?.checked === true);
   });
@@ -698,7 +704,7 @@ function renderDatasetReadiness(readiness) {
   state.datasetReadiness = readiness;
   $('#dataset-reviewed').textContent = (readiness.reviewed_events ?? 0) + (readiness.manual_frames ?? 0);
   $('#dataset-groups').textContent = readiness.round_groups ?? 0;
-  $('#dataset-eligible').textContent = readiness.default_classes?.length ?? 0;
+  $('#dataset-eligible').textContent = readiness.suggested_classes?.length ?? 0;
   $('#dataset-warnings').innerHTML = (readiness.warnings || [])
     .map((warning) => `<div class="notice">${escapeHtml(warning)}</div>`).join('');
   const body = $('#dataset-classes');
@@ -707,7 +713,7 @@ function renderDatasetReadiness(readiness) {
   } else {
     body.innerHTML = readiness.classes.map((row) => {
       const checked = readiness.default_classes.includes(row.class_id) ? ' checked' : '';
-      const disabled = row.box_ready_events < readiness.gates.train ? ' disabled' : '';
+      const disabled = row.box_ready_events < 1 ? ' disabled' : '';
       const className = row.gate === 'insufficient' ? 'insufficient' : row.gate;
       return `
         <tr>
@@ -1079,8 +1085,9 @@ $('#launch-xany').addEventListener('click', async () => {
 });
 $('#refresh-dataset').addEventListener('click', loadDatasetPage);
 $('#dataset-classes').addEventListener('change', updateDatasetSelection);
+$('#allow-below-suggestion').addEventListener('change', updateDatasetSelection);
 $('#select-eligible').addEventListener('click', () => {
-  const ready = new Set(state.datasetReadiness?.default_classes || []);
+  const ready = new Set(state.datasetReadiness?.suggested_classes || []);
   $$('#dataset-classes input[type="checkbox"]').forEach((input) => {
     input.checked = ready.has(Number(input.value));
   });
@@ -1096,7 +1103,10 @@ $('#build-dataset').addEventListener('click', async () => {
   try {
     const result = await api('/api/datasets/build', {
       method: 'POST',
-      body: JSON.stringify({ class_ids: classIds }),
+      body: JSON.stringify({
+        class_ids: classIds,
+        allow_below_suggestion: $('#allow-below-suggestion').checked,
+      }),
     });
     toast(`数据集 ${result.version} 已生成。`);
     await loadDatasetPage();
