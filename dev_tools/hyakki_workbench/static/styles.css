@@ -193,7 +193,8 @@ main { max-width: 1450px; margin: 0 auto; padding: 28px clamp(20px, 4vw, 64px) 7
   display: grid;
   grid-template-columns: minmax(210px, .72fr) minmax(420px, 1.75fr) minmax(280px, .9fr);
   gap: 14px;
-  min-height: 650px;
+  min-height: 0;
+  align-items: start;
 }
 .review-queue, .review-stage, .review-actions { min-width: 0; }
 .review-queue { max-height: 720px; overflow: hidden; }
@@ -218,8 +219,20 @@ main { max-width: 1450px; margin: 0 auto; padding: 28px clamp(20px, 4vw, 64px) 7
 .review-item img { width: 64px; height: 42px; border-radius: 6px; object-fit: cover; background: #050608; }
 .review-item strong { display: block; margin: 2px 0 4px; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .review-item span { color: var(--muted); font-size: 11px; }
-.review-stage { display: flex; flex-direction: column; justify-content: center; min-height: 650px; }
-.empty-stage { display: grid; gap: 8px; place-content: center; min-height: 480px; color: var(--muted); text-align: center; }
+.review-stage {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  min-height: 0;
+}
+.empty-stage {
+  display: grid;
+  gap: 8px;
+  place-content: center;
+  min-height: 220px;
+  color: var(--muted);
+  text-align: center;
+}
 .empty-stage strong { color: var(--text); font-size: 18px; }
 .review-content { display: grid; gap: 13px; align-content: start; }
 .frame-tabs { display: flex; gap: 7px; }
@@ -236,7 +249,7 @@ main { max-width: 1450px; margin: 0 auto; padding: 28px clamp(20px, 4vw, 64px) 7
   position: relative;
   display: grid;
   place-items: center;
-  min-height: 390px;
+  min-height: 0;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 12px;
