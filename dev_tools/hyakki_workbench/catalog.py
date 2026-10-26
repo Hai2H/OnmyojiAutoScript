@@ -196,6 +196,12 @@ class Catalog:
     def close(self) -> None:
         self.connection.close()
 
+    def __enter__(self) -> 'Catalog':
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.close()
+
     def scan(self) -> ScanResult:
         self._load_class_table()
         bean_events, bean_rounds = self._scan_bean()

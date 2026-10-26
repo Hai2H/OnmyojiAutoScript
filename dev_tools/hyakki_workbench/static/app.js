@@ -9,6 +9,9 @@ const state = {
   labelPackage: null,
   datasetReadiness: null,
   datasets: [],
+  trainingJobs: [],
+  currentJob: null,
+  trainingPoll: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -422,11 +425,135 @@ async function loadDatasetPage() {
   }
 }
 
+function renderGpu(gpu) {
+  const element = $('#gpu-status');
+  if (gpu?.available) {
+    element.textContent = `${gpu.name} · ${gpu.memory_used_mb}/${gpu.memory_total_mb} MB`;
+  } else {
+    element.textContent = 'GPU 不可用';
+  }
+}
+
+function renderTrainingJobs(payload) {
+  state.trainingJobs = payload.items || [];
+  renderGpu(payload.gpu);
+  const container = $('#training-jobs');
+  if (!state.trainingJobs.length) {
+    container.className = 'job-list empty';
+    container.textContent = '还没有训练任务';
+  } else {
+    container.className = 'job-list';
+    container.innerHTML = state.trainingJobs.map((job) => `
+      <button class="job-item${state.currentJob?.id === job.id ? ' active' : ''}" data-job-id="${escapeHtml(job.id)}">
+        <strong><span>${escapeHtml(job.kind)} · ${escapeHtml(job.id)}</span><em class="job-state ${escapeHtml(job.status)}">${escapeHtml(job.status)}</em></strong>
+        <span>${escapeHtml(job.dataset_version)} · ${escapeHtml(job.model)} · ${escapeHtml(job.created_at)}</span>
+      </button>`).join('');
+  }
+  const active = state.trainingJobs.some((job) => ['queued', 'running'].includes(job.status));
+  $('#start-training').disabled = Boolean(payload.active);
+  if (active) {
+    clearTimeout(state.trainingPoll);
+    state.trainingPoll = setTimeout(refreshTraining, 2500);
+  }
+}
+
+function classRowsForJob(job) {
+  const dataset = state.datasets.find((item) => item.version === job.dataset_version);
+  return new Map((dataset?.classes || []).map((item) => [item.class_index, item]));
+}
+
+function renderJobMetrics(job) {
+  const result = job.result;
+  if (!result) {
+    $('#job-metrics').innerHTML = job.error
+      ? `<div class="notice">${escapeHtml(job.error)}</div>`
+      : '<span class="muted">训练完成后显示每类 Precision / Recall 和校准阈值。</span>';
+    return;
+  }
+  const metricSet = result.test || result.val;
+  if (!metricSet) {
+    $('#job-metrics').textContent = '任务已完成，但没有指标数据。';
+    return;
+  }
+  const classes = classRowsForJob(job);
+  const thresholds = result.thresholds || {};
+  const rows = (metricSet.classes || []).map((row) => {
+    const meta = classes.get(row.class_index) || {};
+    return `<tr>
+      <td>${escapeHtml(meta.name || row.class_index)}</td>
+      <td>${Math.round(row.precision * 100)}%</td>
+      <td>${Math.round(row.recall * 100)}%</td>
+      <td>${thresholds[String(row.class_index)] ?? '—'}</td>
+      <td>${row.tp}/${row.fp}/${row.fn}</td>
+    </tr>`;
+  }).join('');
+  $('#job-metrics').innerHTML = `
+    <div class="metrics">
+      <article><span>${escapeHtml(metricSet.split)} 图</span><strong>${metricSet.images}</strong></article>
+      <article><span>Precision</span><strong>${Math.round(metricSet.precision * 100)}%</strong></article>
+      <article><span>Recall</span><strong>${Math.round(metricSet.recall * 100)}%</strong></article>
+      <article><span>best.pt</span><strong>${result.best_weight ? '已生成' : '—'}</strong></article>
+    </div>
+    <table class="metrics-table"><thead><tr><th>类别</th><th>P</th><th>R</th><th>阈值</th><th>TP/FP/FN</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+async function selectTrainingJob(jobId, includeLog = true) {
+  try {
+    const suffix = includeLog ? '?log_tail=60000' : '';
+    const job = await api(`/api/training/${encodeURIComponent(jobId)}${suffix}`);
+    state.currentJob = job;
+    $$('.job-item').forEach((item) => item.classList.toggle('active', item.dataset.jobId === jobId));
+    $('#job-title').textContent = `${job.kind} · ${job.status}`;
+    $('#job-log').textContent = job.log || '（暂无日志）';
+    $('#job-log').scrollTop = $('#job-log').scrollHeight;
+    renderJobMetrics(job);
+    $('#run-test').disabled = !(job.kind === 'train' && job.status === 'completed' && job.result?.best_weight);
+    $('#cancel-job').disabled = !['queued', 'running'].includes(job.status);
+  } catch (error) {
+    toast(`读取任务失败：${error.message}`);
+  }
+}
+
+function datasetOptions(items) {
+  const current = $('#train-dataset').value;
+  $('#train-dataset').innerHTML = (items || []).map((item) => `
+    <option value="${escapeHtml(item.version)}">${escapeHtml(item.version)} · ${item.stats?.images || 0} 图 · ${item.stats?.boxes || 0} 框</option>
+  `).join('');
+  if (current && [...$('#train-dataset').options].some((item) => item.value === current)) {
+    $('#train-dataset').value = current;
+  }
+}
+
+async function refreshTraining(includeDetails = true) {
+  try {
+    const [payload, history] = await Promise.all([
+      api('/api/training?limit=30'),
+      api('/api/datasets'),
+    ]);
+    state.datasets = history.items || [];
+    datasetOptions(state.datasets);
+    renderTrainingJobs(payload);
+    if (state.currentJob) {
+      await selectTrainingJob(state.currentJob.id, includeDetails);
+    }
+  } catch (error) {
+    toast(`读取训练状态失败：${error.message}`);
+  }
+}
+
+async function loadTrainingPage() {
+  await refreshTraining(true);
+  if (!state.currentJob && state.trainingJobs.length) {
+    await selectTrainingJob(state.trainingJobs[0].id);
+  }
+}
+
 $$('.step').forEach((button) => {
   button.addEventListener('click', () => {
     switchPage(button.dataset.page);
     if (button.dataset.page === 'review') loadReviewQueue(true);
     if (button.dataset.page === 'dataset') loadDatasetPage();
+    if (button.dataset.page === 'training') loadTrainingPage();
   });
 });
 $('#scan-button').addEventListener('click', scan);
@@ -551,6 +678,64 @@ $('#build-dataset').addEventListener('click', async () => {
   } catch (error) {
     toast(`构建失败：${error.message}`);
     updateDatasetSelection();
+  }
+});
+$('#refresh-training').addEventListener('click', () => refreshTraining(true));
+$('#training-jobs').addEventListener('click', (event) => {
+  const item = event.target.closest('[data-job-id]');
+  if (item) selectTrainingJob(item.dataset.jobId);
+});
+$('#start-training').addEventListener('click', async () => {
+  const datasetVersion = $('#train-dataset').value;
+  if (!datasetVersion) {
+    toast('请先构建数据集版本。');
+    return;
+  }
+  try {
+    const job = await api('/api/training/start', {
+      method: 'POST',
+      body: JSON.stringify({
+        dataset_version: datasetVersion,
+        model: $('#train-model').value,
+        epochs: Number($('#train-epochs').value),
+        imgsz: Number($('#train-imgsz').value),
+        batch: Number($('#train-batch').value),
+        patience: Number($('#train-patience').value),
+      }),
+    });
+    state.currentJob = job;
+    toast(`训练任务已启动：${job.id}`);
+    await refreshTraining(true);
+    await selectTrainingJob(job.id);
+  } catch (error) {
+    toast(`启动失败：${error.message}`);
+  }
+});
+$('#run-test').addEventListener('click', async () => {
+  if (!state.currentJob) return;
+  try {
+    const job = await api(`/api/training/${encodeURIComponent(state.currentJob.id)}/test`, {
+      method: 'POST',
+      body: JSON.stringify({
+        imgsz: Number($('#train-imgsz').value),
+        batch: Number($('#train-batch').value),
+      }),
+    });
+    toast(`最终测试已启动：${job.id}`);
+    await refreshTraining(true);
+    await selectTrainingJob(job.id);
+  } catch (error) {
+    toast(`无法运行测试：${error.message}`);
+  }
+});
+$('#cancel-job').addEventListener('click', async () => {
+  if (!state.currentJob) return;
+  try {
+    await api(`/api/training/${encodeURIComponent(state.currentJob.id)}/cancel`, { method: 'POST' });
+    toast('任务已取消。');
+    await refreshTraining(true);
+  } catch (error) {
+    toast(`取消失败：${error.message}`);
   }
 });
 

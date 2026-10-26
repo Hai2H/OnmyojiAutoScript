@@ -197,11 +197,50 @@
       </div>
     </section>
     <section id="page-training" class="page">
-      <article class="panel placeholder">
-        <p class="eyebrow">TRAIN &amp; EVALUATE</p>
-        <h2>训练与评估页</h2>
-        <p>单 GPU 队列、YOLO11 参数、实时曲线、阈值校准和最终测试。</p>
-      </article>
+      <div class="review-header">
+        <div>
+          <p class="eyebrow">TRAIN &amp; EVALUATE</p>
+          <h2>GPU 训练与最终验收</h2>
+          <p class="hint">只允许一个训练或测试任务。浏览器关闭后任务继续；test 只对已训练模型手动启动。</p>
+        </div>
+        <div class="gpu-chip" id="gpu-status">正在检测 GPU…</div>
+      </div>
+      <div class="training-layout">
+        <article class="panel train-config">
+          <h3>新训练任务</h3>
+          <label class="field-label" for="train-dataset">数据集版本</label>
+          <select id="train-dataset"></select>
+          <div class="form-grid">
+            <label>模型<select id="train-model"><option value="yolo11s.pt">yolo11s（基准）</option><option value="yolo11n.pt">yolo11n（低延迟）</option></select></label>
+            <label>输入尺寸<input id="train-imgsz" type="number" value="960" min="320" max="1280" step="32"></label>
+            <label>epochs<input id="train-epochs" type="number" value="100" min="1" max="500"></label>
+            <label>batch<input id="train-batch" type="number" value="4" min="1" max="32"></label>
+            <label>patience<input id="train-patience" type="number" value="20" min="1" max="200"></label>
+          </div>
+          <button id="start-training" class="button primary">开始训练</button>
+          <p class="hint">训练环境：.venv-train · GPU 0 · FP16 · 单任务队列</p>
+        </article>
+
+        <article class="panel train-jobs">
+          <div class="panel-title">
+            <h3>任务</h3>
+            <button id="refresh-training" class="text-button">刷新</button>
+          </div>
+          <div id="training-jobs" class="job-list empty">还没有训练任务</div>
+        </article>
+
+        <article class="panel job-detail">
+          <div class="panel-title">
+            <h3 id="job-title">任务详情</h3>
+            <div class="inline-actions">
+              <button id="run-test" class="text-button" disabled>运行最终 test</button>
+              <button id="cancel-job" class="text-button" disabled>取消任务</button>
+            </div>
+          </div>
+          <div id="job-metrics" class="job-metrics muted">选择左侧任务查看指标。</div>
+          <pre id="job-log" class="job-log">（暂无日志）</pre>
+        </article>
+      </div>
     </section>
     <section id="page-deploy" class="page">
       <article class="panel placeholder">

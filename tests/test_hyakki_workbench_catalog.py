@@ -5,6 +5,8 @@ from pathlib import Path
 
 from dev_tools.hyakki_workbench import WorkspacePaths, WorkbenchStore
 from dev_tools.hyakki_workbench.dataset import DatasetBuilder
+from dev_tools.hyakki_workbench.training_manager import TrainingManager
+from dev_tools.hyakki_workbench.training_worker import match_predictions, read_ground_truth
 from PIL import Image
 
 
@@ -203,6 +205,37 @@ class WorkbenchCatalogTest(unittest.TestCase):
             self.assertNotIn('test:', data_yaml)
         finally:
             store.close()
+
+    def test_training_manager_starts_empty_and_persists_job_schema(self) -> None:
+        paths = self.paths(self.root / 'bean_capture', self.root / 'boss_capture')
+        manager = TrainingManager(paths)
+        payload = manager.list_jobs()
+        self.assertEqual(payload['items'], [])
+        self.assertEqual(payload['active'], 0)
+        with self.assertRaises(KeyError):
+            manager.get_job('missing')
+
+    def test_threshold_matching_counts_tp_fp_and_fn(self) -> None:
+        predictions = [
+            [0, 0.90, 0.1, 0.1, 0.5, 0.5],
+            [0, 0.80, 0.6, 0.6, 0.9, 0.9],
+        ]
+        truths = [[0, 0.1, 0.1, 0.5, 0.5]]
+        tp, fp, fn = match_predictions(predictions, truths, 0.5)
+        self.assertEqual((tp, fp, fn), (1, 1, 0))
+        tp, fp, fn = match_predictions(predictions, truths, 0.95)
+        self.assertEqual((tp, fp, fn), (0, 0, 1))
+
+    def test_yolo_ground_truth_path_is_read_from_sibling_labels_dir(self) -> None:
+        image = self.root / 'dataset' / 'images' / 'val' / 'sample.jpg'
+        write_image(image)
+        label = self.root / 'dataset' / 'labels' / 'val' / 'sample.txt'
+        label.parent.mkdir(parents=True)
+        label.write_text('0 0.5 0.5 0.2 0.4\n', encoding='utf-8')
+        truth = read_ground_truth(image, 1)
+        self.assertEqual(truth[0][0], 0)
+        for actual, expected in zip(truth[0][1:], [0.4, 0.3, 0.6, 0.7]):
+            self.assertAlmostEqual(actual, expected)
 
 
 if __name__ == '__main__':

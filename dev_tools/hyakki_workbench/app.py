@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from .paths import WorkspacePaths
 from .store import WorkbenchStore
 from .dataset import DatasetBuilder
+from .training_manager import TrainingManager
 
 
 class ReviewRequest(BaseModel):
@@ -34,10 +35,25 @@ class DatasetBuildRequest(BaseModel):
     class_ids: list[int] | None = None
 
 
+class TrainingStartRequest(BaseModel):
+    dataset_version: str
+    model: str = 'yolo11s.pt'
+    epochs: int = 100
+    imgsz: int = 960
+    batch: int = 4
+    patience: int = 20
+
+
+class TrainingTestRequest(BaseModel):
+    imgsz: int = 960
+    batch: int = 4
+
+
 def create_app(paths: WorkspacePaths | None = None) -> FastAPI:
     workspace = paths or WorkspacePaths()
     workspace.ensure()
     scan_lock = threading.Lock()
+    training = TrainingManager(workspace)
 
     app = FastAPI(title='百鬼夜行训练工作台', version='0.1.0')
 
@@ -175,6 +191,58 @@ def create_app(paths: WorkspacePaths | None = None) -> FastAPI:
                 return DatasetBuilder(catalog).build(request.class_ids)
             except ValueError as exception:
                 raise HTTPException(status_code=422, detail=str(exception)) from exception
+
+    @app.get('/api/training')
+    def training_jobs(
+        limit: int = Query(default=20, ge=1, le=100),
+        log_tail: int = Query(default=0, ge=0, le=200000),
+    ) -> dict:
+        return training.list_jobs(limit=limit, log_tail=log_tail)
+
+    @app.post('/api/training/start')
+    def start_training(request: TrainingStartRequest) -> dict:
+        try:
+            return training.start_training(
+                dataset_version=request.dataset_version,
+                model=request.model,
+                epochs=request.epochs,
+                imgsz=request.imgsz,
+                batch=request.batch,
+                patience=request.patience,
+            )
+        except ValueError as exception:
+            raise HTTPException(status_code=422, detail=str(exception)) from exception
+
+    @app.get('/api/training/{job_id}')
+    def training_job(
+        job_id: str,
+        log_tail: int = Query(default=60000, ge=0, le=200000),
+    ) -> dict:
+        try:
+            return training.get_job(job_id, log_tail=log_tail)
+        except KeyError as exception:
+            raise HTTPException(status_code=404, detail='任务不存在') from exception
+
+    @app.post('/api/training/{job_id}/test')
+    def test_training(
+        job_id: str,
+        request: TrainingTestRequest,
+    ) -> dict:
+        try:
+            return training.start_test(job_id, imgsz=request.imgsz, batch=request.batch)
+        except KeyError as exception:
+            raise HTTPException(status_code=404, detail='训练任务不存在') from exception
+        except ValueError as exception:
+            raise HTTPException(status_code=422, detail=str(exception)) from exception
+
+    @app.post('/api/training/{job_id}/cancel')
+    def cancel_training(job_id: str) -> dict:
+        try:
+            return training.cancel(job_id)
+        except KeyError as exception:
+            raise HTTPException(status_code=404, detail='训练任务不存在') from exception
+        except ValueError as exception:
+            raise HTTPException(status_code=422, detail=str(exception)) from exception
 
     @app.get('/api/xany')
     def xany_config() -> dict:
