@@ -8,7 +8,7 @@ import re
 import inflection
 
 from pathlib import Path
-from pydantic import BaseModel, ValidationError, Field
+from pydantic import BaseModel, ValidationError, Field, TypeAdapter
 
 from module.config.utils import *
 from module.logger import logger
@@ -418,6 +418,15 @@ class ConfigModel(ConfigBase):
 
         # 设置参数
         try:
+            # pydantic v2 默认不校验赋值（validate_assignment=False），直接 setattr 会把
+            # 枚举字段存成裸 str，保存时触发 serializer warning:
+            # "Expected `enum` but got `str`". 这里按字段注解先校验/转换一次，
+            # 保证内存中的类型与模型声明一致（枚举值仍以字符串写入 JSON）。
+            model_fields = getattr(type(group_object), 'model_fields', None) or {}
+            field = model_fields.get(argument)
+            if field is not None:
+                value = TypeAdapter(field.annotation).validate_python(value)
+
             setattr(group_object, argument, value)
             logger.info(f'Set arg {self.config_name}.{task}.{group}.{argument}.{value}')
             self.save()  # 我是没有想到什么方法可以使得属性改变自动保存的

@@ -16,6 +16,14 @@ class InferenceEngine(str, Enum):
     TENSORRT = 'TensorRT'
 
 
+class DetectorMode(str, Enum):
+    AUTO = 'Auto'
+    OLD = 'Old'
+    SHADOW = 'Shadow'
+    ASSIST = 'Assist'
+    PRIMARY = 'Primary'
+
+
 class ScreenshotMethod(str, Enum):
     WINDOW_BACKGROUND = 'window_background'
     NEMU_IPC = 'nemu_ipc'
@@ -52,9 +60,30 @@ class HyakkiyakouModels(ConfigBase):
     model_precision: ModelPrecision = Field(default=ModelPrecision.FP32, description='model_precision_help')
     # 推理引擎 目前全部是onnxruntime
     inference_engine: InferenceEngine = Field(default=InferenceEngine.ONNXRUNTIME, description='inference_engine_help')
+    # 自建 YOLO11 与旧模型的共存模式
+    detector_mode: DetectorMode = Field(default=DetectorMode.AUTO, description='hya_detector_mode_help')
+    detector_manifest: str = Field(default='weights/hyakkiyakou/active.json',
+                                   description='hya_detector_manifest_help')
+    detector_timeout_ms: int = Field(default=120, description='hya_detector_timeout_ms_help')
+    detector_log: bool = Field(default=False, description='hya_detector_log_help')
 
 
 class DebugConfig(ConfigBase):
+    # 每局开始时保存鬼王三个候选的画面，用来做稀有度训练集
+    hya_boss_capture: bool = Field(default=True, description='hya_boss_capture_help')
+    # 撒豆过程整局采集（给新式神做检测训练集）
+    hya_bean_capture: bool = Field(default=False, description='hya_bean_capture_help')
+    # 采集间隔，ms：默认 1000（一只式神横穿 3~5 秒，够拿几个角度）
+    hya_bean_interval: int = Field(default=1000, description='hya_bean_interval_help')
+    # JPEG 质量
+    hya_bean_quality: int = Field(default=88, description='hya_bean_quality_help')
+    # 空场景（一个目标都没有）时每 N 秒也存一张，当负样本
+    hya_bean_empty_every: int = Field(default=5, description='hya_bean_empty_every_help')
+    # 同时写旧模型的预标注 JSON，供 X-AnyLabeling 修改
+    hya_bean_prelabel: bool = Field(default=True, description='hya_bean_prelabel_help')
+    # 鬼王稀有度模型；留空则只用旧检测。文件不存在时自动回退
+    hya_boss_model: str = Field(default='data/boss_rarity/model/boss_rarity.onnx',
+                                description='hya_boss_model_help')
     # 运行期间现实每一张的跟踪结果
     hya_show: bool = Field(default=False, description='hya_show_help')
     # 输出更多调试信息， 给使用者显示的

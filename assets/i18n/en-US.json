@@ -1,3 +1,22 @@
 {
-
+  "hya_boss_capture": "Save boss candidate screenshots",
+  "hya_boss_capture_help": "Save the three boss candidates at the start of each run to log/hyakkiyakou/boss_capture, used to train rarity recognition. About 0.7MB per run.",
+  "hya_bean_capture": "Capture bean-throwing frames",
+  "hya_bean_capture_help": "Save frames to data/bean_capture (raw + old-model prelabels) for training new shikigami detection.",
+  "hya_bean_interval": "Capture interval (ms)",
+  "hya_bean_interval_help": "Default 1000 ms.",
+  "hya_bean_quality": "JPEG quality",
+  "hya_bean_quality_help": "Default 88.",
+  "hya_bean_empty_every": "Empty scene interval (s)",
+  "hya_bean_empty_every_help": "Also save one frame every N seconds when nothing is detected.",
+  "hya_bean_prelabel": "Write old-model prelabels",
+  "hya_bean_prelabel_help": "Write X-AnyLabeling JSON under prelabel/; boxes are suggestions only.",
+  "hya_detector_mode": "YOLO11 coexistence mode",
+  "hya_detector_mode_help": "Auto follows the workbench; Old, Shadow, Assist and Primary are explicit overrides.",
+  "hya_detector_manifest": "YOLO11 active manifest",
+  "hya_detector_manifest_help": "active.json written after publishing a model.",
+  "hya_detector_timeout_ms": "YOLO11 service timeout (ms)",
+  "hya_detector_timeout_ms_help": "On timeout, the current frame falls back to the old model.",
+  "hya_detector_log": "Log old/new router statistics",
+  "hya_detector_log_help": "Write at most one summary per second under log/hyakkiyakou."
 }

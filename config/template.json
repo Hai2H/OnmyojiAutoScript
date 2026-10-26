@@ -1091,7 +1091,11 @@
       "conf_threshold": 0.6,
       "iou_threshold": 0.7,
       "model_precision": "FP32",
-      "inference_engine": "Onnxruntime"
+      "inference_engine": "Onnxruntime",
+      "detector_mode": "Auto",
+      "detector_manifest": "weights/hyakkiyakou/active.json",
+      "detector_timeout_ms": 120,
+      "detector_log": false
     },
     "debug_config": {
       "hya_show": false,

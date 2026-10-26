@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import shutil
 import sys
+import time
 from collections import defaultdict
 from pathlib import Path
 
@@ -95,7 +97,9 @@ def split_stats(root: Path, split: str, classes: int, thresholds: dict[str, floa
         path for path in image_dir.glob('*') if path.suffix.lower() in {'.jpg', '.jpeg', '.png'}
     )
     totals = defaultdict(lambda: {'tp': 0, 'fp': 0, 'fn': 0})
-    for image in images:
+    durations = []
+    for image_index, image in enumerate(images):
+        started = time.perf_counter()
         result = model.predict(
             source=str(image),
             conf=0.01,
@@ -105,6 +109,8 @@ def split_stats(root: Path, split: str, classes: int, thresholds: dict[str, floa
             verbose=False,
             max_det=300,
         )[0]
+        if image_index:
+            durations.append((time.perf_counter() - started) * 1000)
         predictions = predictions_from_result(result)
         truths = read_ground_truth(image, classes)
         for class_id in range(classes):
@@ -131,11 +137,16 @@ def split_stats(root: Path, split: str, classes: int, thresholds: dict[str, floa
             overall[key] += item[key]
     precision = overall['tp'] / max(1, overall['tp'] + overall['fp'])
     recall = overall['tp'] / max(1, overall['tp'] + overall['fn'])
+    ordered = sorted(durations)
+    p50 = ordered[max(0, math.ceil(len(ordered) * .50) - 1)] if ordered else None
+    p95 = ordered[max(0, math.ceil(len(ordered) * .95) - 1)] if ordered else None
     return {
         'split': split,
         'images': len(images),
         'precision': round(precision, 6),
         'recall': round(recall, 6),
+        'latency_ms_p50': round(p50, 2) if p50 is not None else None,
+        'latency_ms_p95': round(p95, 2) if p95 is not None else None,
         'classes': rows,
         **overall,
     }
@@ -249,6 +260,26 @@ def run_test(args) -> dict:
     return {'ok': True, 'test': test, 'test_metrics_path': str(path)}
 
 
+def run_export(args) -> dict:
+    from ultralytics import YOLO
+
+    output = Path(args.run_dir) / 'export'
+    output.mkdir(parents=True, exist_ok=True)
+    model = YOLO(args.weight, task='detect')
+    exported = Path(model.export(
+        format='onnx',
+        imgsz=args.imgsz,
+        dynamic=False,
+        simplify=True,
+        opset=12,
+        device=0,
+    )).resolve()
+    target = (output / 'model.onnx').resolve()
+    if exported != target:
+        shutil.copy2(exported, target)
+    return {'ok': True, 'onnx': str(target)}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
@@ -269,12 +300,22 @@ def main() -> int:
     test.add_argument('--thresholds', required=True)
     test.add_argument('--imgsz', type=int, default=960)
     test.add_argument('--batch', type=int, default=4)
+    export = sub.add_parser('export')
+    export.add_argument('--job-id', required=True)
+    export.add_argument('--run-dir', required=True)
+    export.add_argument('--weight', required=True)
+    export.add_argument('--imgsz', type=int, default=960)
     args = parser.parse_args()
     run_dir = Path(args.run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     result_path = run_dir / 'result.json'
     try:
-        result = run_train(args) if args.command == 'train' else run_test(args)
+        if args.command == 'train':
+            result = run_train(args)
+        elif args.command == 'test':
+            result = run_test(args)
+        else:
+            result = run_export(args)
         result_path.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding='utf-8')
         print('HYAKKI_RESULT=' + json.dumps(result, ensure_ascii=False))
         return 0

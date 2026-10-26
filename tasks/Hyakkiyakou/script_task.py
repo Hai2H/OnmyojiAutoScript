@@ -9,6 +9,8 @@ import numpy as np
 from datetime import datetime, timedelta
 from numpy import uint8, fromfile
 from random import choice
+from pathlib import Path
+
 from cached_property import cached_property
 # Use cmd to install: ./toolkit/python.exe -m pip install -i https://pypi.org/simple/ oashya --trusted-host pypi.org
 # update oashya:  ./toolkit/python.exe -m pip install --upgrade oashya
@@ -26,6 +28,10 @@ from tasks.Hyakkiyakou.config import InferenceEngine, ModelPrecision
 from tasks.Hyakkiyakou.agent.agent import Agent
 from tasks.Hyakkiyakou.slave.hya_slave import HyaSlave
 from tasks.Hyakkiyakou.debugger import Debugger
+from tasks.Hyakkiyakou.boss_capture import BossCapture
+from tasks.Hyakkiyakou.boss_rarity import BossRarityModel
+from tasks.Hyakkiyakou.bean_capture import BeanCapture
+from tasks.Hyakkiyakou.new_detector import DetectionRouter
 
 
 def plot_save(image, boxes):
@@ -104,6 +110,70 @@ class ScriptTask(GameUi, HyaSlave, SwitchOnmyoji):
             'auto_bean': hya_config.hya_auto_bean
         }
         return Agent(strategy=strategy)
+
+    @cached_property
+    def bean_capture(self) -> BeanCapture | None:
+        """撒豆整局采集；开关关闭时返回 None，零开销。"""
+        debug = self._config.debug_config
+        if not debug.hya_bean_capture:
+            return None
+        models = self._config.hyakkiyakou_models
+        capture = BeanCapture(
+            interval_ms=debug.hya_bean_interval,
+            quality=debug.hya_bean_quality,
+            prelabel=debug.hya_bean_prelabel,
+            empty_every=debug.hya_bean_empty_every,
+            settings={'oashya_conf': models.conf_threshold, 'oashya_iou': models.iou_threshold,
+                      'screenshot_method': str(debug.hya_screenshot_method)},
+        )
+        logger.info(f'Bean capture enabled: {capture.root.resolve()}')
+        return capture
+
+    @cached_property
+    def detector(self) -> DetectionRouter:
+        """旧 tracker + 可选 YOLO11 GPU 服务；任何新模型异常都回退旧结果。"""
+        models = self._config.hyakkiyakou_models
+        router = DetectionRouter(
+            self.tracker,
+            project_root=Path(__file__).resolve().parents[2],
+            mode=models.detector_mode.value,
+            manifest_path=models.detector_manifest,
+            timeout_ms=models.detector_timeout_ms,
+            observation_log=models.detector_log,
+        )
+        version = router.manifest.get('model_version')
+        logger.info(f'Hyakki detector mode={router.mode}, version={version or "old-only"}')
+        return router
+
+    @cached_property
+    def boss_model(self) -> BossRarityModel | None:
+        """鬼王稀有度模型；未配置、文件不存在或加载失败时返回 None（回退旧检测）。"""
+        path = (self._config.debug_config.hya_boss_model or '').strip()
+        if not path:
+            return None
+        if not Path(path).is_file():
+            logger.info(f'Boss rarity model not found: {path}，继续使用 oashya')
+            return None
+        try:
+            model = BossRarityModel(path)
+            if not model.usable:
+                logger.warning(
+                    f'Boss rarity model 不优于多数类基线'
+                    f'（CV {model.cv_accuracy} <= 基线 {model.baseline}），先不启用，继续用 oashya')
+                return None
+            logger.info(f'Boss rarity model loaded: {path} (threshold {model.threshold}, '
+                        f'CV {model.cv_accuracy} > 基线 {model.baseline})')
+            return model
+        except Exception as exception:
+            logger.warning(f'Boss rarity model unavailable: {exception}')
+            return None
+
+    @cached_property
+    def boss_capture(self) -> BossCapture | None:
+        """鬼王候选截图；关闭开关时返回 None，不影响主流程。"""
+        if not self._config.debug_config.hya_boss_capture:
+            return None
+        return BossCapture()
 
     @cached_property
     def debugger(self) -> Debugger:
@@ -188,7 +258,7 @@ class ScriptTask(GameUi, HyaSlave, SwitchOnmyoji):
         # 截一张当前图
         self.screenshot()
         # 这里 response 随便给一个默认值即可，主线战斗里是 last_action
-        tracks = self.tracker(image=self.device.image, response=[0, 0, False, 10])
+        tracks = self.detector(image=self.device.image, response=[0, 0, False, 10])
         best_score = -1
         best_class = -1
         for _id, _class, _conf, _cx, _cy, _w, _h, _v in tracks:
@@ -205,6 +275,26 @@ class ScriptTask(GameUi, HyaSlave, SwitchOnmyoji):
             logger.warning('Hyakki select: no valid shikigami detected on title screen')
         return best_score, best_class
 
+    def _boss_score(self, index: int) -> tuple[int, int]:
+        """优先用稀有度模型，不够自信时回退旧检测。
+
+        返回 (稀有度分, class_id)；走模型时 class_id 为 -1。
+        """
+        model = self.boss_model
+        if model is None:
+            return self._detect_current_rarity()
+        self.screenshot()
+        try:
+            score, label, confidence = model.score(self.device.image, index)
+        except Exception as exception:
+            logger.warning(f'Boss model failed, fallback to oashya: {exception}')
+            return self._detect_current_rarity()
+        if confidence < model.threshold:
+            logger.info(f'Boss model low confidence {confidence:.2f} ({label}), fallback to oashya')
+            return self._detect_current_rarity()
+        logger.info(f'Boss model: {label} {confidence:.2f} → rarity score {score}')
+        return score, -1
+
     def _select_best_boss(self):
         """
         在鬼王选择界面依次点三个候选，识别稀有度，最终选择最高稀有度的那个。
@@ -212,6 +302,8 @@ class ScriptTask(GameUi, HyaSlave, SwitchOnmyoji):
         """
         candidates = [self.C_HSELECT_1, self.C_HSELECT_2, self.C_HSELECT_3]
         logger.info('Start selecting boss')
+        if self.boss_capture is not None:
+            logger.info(f'Boss capture folder: {self.boss_capture.begin_round().resolve()}')
         best_idx = 0
         best_score = -1
         scores = []
@@ -220,7 +312,10 @@ class ScriptTask(GameUi, HyaSlave, SwitchOnmyoji):
             # 点一下第 idx 个候选，让它成为当前选中的式神
             self.click(btn, interval=0.1)
             time.sleep(1)  # 给界面一点刷新时间
-            score, cls = self._detect_current_rarity()
+            score, cls = self._boss_score(idx)
+            if self.boss_capture is not None:
+                self.boss_capture.save(self.device.image, idx, score, cls,
+                                       id2name(cls) if cls >= 0 else None)
             scores.append(score)
             if score > best_score:
                 best_score = score
@@ -228,6 +323,8 @@ class ScriptTask(GameUi, HyaSlave, SwitchOnmyoji):
         
         #所以如果三个都识别失败了会选第一个
         logger.info(f'Hyakki select scores: {scores}, choose index {best_idx + 1}') 
+        if self.boss_capture is not None:
+            self.boss_capture.finish()
 
         # 记录一下，后面如果需要兜底再点一次可以用
         self._best_boss_button = candidates[best_idx]
@@ -260,6 +357,8 @@ class ScriptTask(GameUi, HyaSlave, SwitchOnmyoji):
         self.device.stuck_record_add('BATTLE_STATUS_S')
         # 正式开始
         logger.hr('Start Hyakkiyakou')
+        if self.bean_capture is not None:
+            logger.info(f'Bean capture folder: {self.bean_capture.begin_round().resolve()}')
         init_bean_flag: bool = False
         last_action = [0, 0, False, 10]
         self.hya_fs_check_timer.reset()
@@ -281,12 +380,16 @@ class ScriptTask(GameUi, HyaSlave, SwitchOnmyoji):
                 # -------------------------------------------------------
                 freeze = self.appear(self.I_HFREEZE)
                 self.slave_state = self.update_state()
-                tracks = self.tracker(image=self.device.image, response=last_action)
+                tracks = self.detector(image=self.device.image, response=last_action)
                 last_action = self.agent.decision(tracks=tracks, state=self.slave_state, freeze=freeze)
                 self.do_action(last_action, state=self.slave_state)
+                if self.bean_capture is not None:
+                    self.bean_capture.tick(self.device.image, tracks, phase='running')
             else:
                 # TODO freeze state
                 tracks = []
+                if self.bean_capture is not None:
+                    self.bean_capture.tick(self.device.image, [], phase='frozen_skipped')
 
             # debug
             if self._config.debug_config.hya_show:
@@ -297,6 +400,8 @@ class ScriptTask(GameUi, HyaSlave, SwitchOnmyoji):
             if self._config.debug_config.hya_info:
                 self.debugger.show_info(tracker=self.tracker, f=self.agent.focus)
 
+        if self.bean_capture is not None:
+            self.bean_capture.finish()
         logger.info('Hyakkiyakou End')
         if self._config.debug_config.hya_show:
             self.debugger.show_stop()
@@ -308,7 +413,7 @@ class ScriptTask(GameUi, HyaSlave, SwitchOnmyoji):
         self.debugger.save_images()
         del self.debugger
         # you maybe update oashya
-        self.tracker.clear_tracks()
+        self.detector.clear_tracks()
 
     def do_action(self, action: list, state):
         x, y, throw, bean = action

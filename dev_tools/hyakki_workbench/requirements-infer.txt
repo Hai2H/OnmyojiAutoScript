@@ -1,0 +1,4 @@
+# Runtime-only environment for ONNX YOLO11 inference.
+numpy>=1.26,<3
+opencv-python-headless>=4.10,<5
+onnxruntime-gpu==1.23.2

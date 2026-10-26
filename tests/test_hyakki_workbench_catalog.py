@@ -5,6 +5,7 @@ from pathlib import Path
 
 from dev_tools.hyakki_workbench import WorkspacePaths, WorkbenchStore
 from dev_tools.hyakki_workbench.dataset import DatasetBuilder
+from dev_tools.hyakki_workbench.deployment import ModelPublisher
 from dev_tools.hyakki_workbench.training_manager import TrainingManager
 from dev_tools.hyakki_workbench.training_worker import match_predictions, read_ground_truth
 from PIL import Image
@@ -102,6 +103,10 @@ class WorkbenchCatalogTest(unittest.TestCase):
             self.assertEqual(summary['events'], 3)
             self.assertEqual(summary['pending_high_rarity'], 2)
             self.assertEqual(summary['rounds'], {'bean': 1, 'boss': 1})
+            capture = store.capture_summary()
+            self.assertEqual(capture['bean']['rounds'], 1)
+            self.assertEqual(capture['boss']['rounds'], 1)
+            self.assertGreater(capture['total_bytes'], 0)
 
             reviewed = store.review_event('bean:2026-10-26_12-00-00_r001:7', action='correct')
             self.assertEqual(reviewed['status'], 'correct')
@@ -236,6 +241,50 @@ class WorkbenchCatalogTest(unittest.TestCase):
         self.assertEqual(truth[0][0], 0)
         for actual, expected in zip(truth[0][1:], [0.4, 0.3, 0.6, 0.7]):
             self.assertAlmostEqual(actual, expected)
+
+    def test_model_publisher_activation_round_trip(self) -> None:
+        paths = self.paths(self.root / 'bean_capture', self.root / 'boss_capture')
+        version = paths.weights_root / 'versions' / 'model-test'
+        version.mkdir(parents=True)
+        (version / 'manifest.json').write_text(
+            json.dumps({
+                'model_version': 'model-test',
+                'service_url': 'http://127.0.0.1:8899',
+                'classes': [],
+            }),
+            encoding='utf-8',
+        )
+        publisher = ModelPublisher(paths)
+        active = publisher.set_active('model-test', 'assist')
+        self.assertEqual(active['mode'], 'assist')
+        self.assertEqual(publisher.active()['model_version'], 'model-test')
+        self.assertTrue(publisher.list_models()[0]['active'])
+
+    def test_publish_gate_requires_every_class_precision_and_recall(self) -> None:
+        run_dir = self.root / 'train'
+        run_dir.mkdir()
+        (run_dir / 'result.json').write_text(
+            json.dumps({'best_weight': str(self.root / 'best.pt')}),
+            encoding='utf-8',
+        )
+        train_job = {'run_dir': str(run_dir), 'result_json': '{}'}
+        test_job = {
+            'result_json': json.dumps({
+                'test': {
+                    'classes': [
+                        {'class_index': 0, 'precision': .96, 'recall': .91, 'tp': 9, 'fp': 0, 'fn': 1},
+                        {'class_index': 1, 'precision': .90, 'recall': .95, 'tp': 9, 'fp': 1, 'fn': 0},
+                    ],
+                },
+            }),
+        }
+        publisher = ModelPublisher(self.paths(
+            self.root / 'bean_capture',
+            self.root / 'boss_capture',
+        ))
+        report = publisher._gate_report(train_job, test_job)
+        self.assertFalse(report['passed'])
+        self.assertTrue(any('类别 1 Precision' in item for item in report['failures']))
 
 
 if __name__ == '__main__':

@@ -12,6 +12,7 @@ const state = {
   trainingJobs: [],
   currentJob: null,
   trainingPoll: null,
+  deployment: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -23,6 +24,14 @@ function escapeHtml(value) {
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;');
+}
+
+function formatBytes(value) {
+  const amount = Number(value || 0);
+  if (amount >= 1024 ** 3) return `${(amount / 1024 ** 3).toFixed(2)} GB`;
+  if (amount >= 1024 ** 2) return `${(amount / 1024 ** 2).toFixed(1)} MB`;
+  if (amount >= 1024) return `${(amount / 1024).toFixed(1)} KB`;
+  return `${amount} B`;
 }
 
 function toast(message) {
@@ -159,12 +168,48 @@ async function scan() {
     const result = await api('/api/scan', { method: 'POST' });
     toast(`扫描完成：${result.events_upserted} 个事件，${result.high_rarity_events} 个高稀有度`);
     await refreshStatus();
+    if ($('#page-capture').classList.contains('active')) await loadCapturePage();
   } catch (error) {
     toast(`扫描失败：${error.message}`);
     await refreshStatus();
   } finally {
     state.scanning = false;
     buttons.forEach((button) => { button.disabled = false; });
+  }
+}
+
+function renderCaptureItems(container, items, kind) {
+  if (!items?.length) {
+    container.className = 'capture-list empty';
+    container.textContent = '没有采集数据';
+    return;
+  }
+  container.className = 'capture-list';
+  container.innerHTML = items.map((item) => `
+    <div class="capture-row">
+      <strong title="${escapeHtml(item.path)}">${escapeHtml(item.round)}</strong>
+      <span>${kind === 'bean' ? `${item.frames_saved ?? '—'} 帧` : `${item.candidates ?? '—'} 候选`}</span>
+      <span>${formatBytes(item.bytes)}</span>
+    </div>`).join('');
+}
+
+async function loadCapturePage() {
+  try {
+    const payload = await api('/api/capture');
+    $('#capture-bean').textContent = payload.bean.rounds;
+    $('#capture-boss').textContent = payload.boss.rounds;
+    $('#capture-size').textContent = formatBytes(payload.total_bytes);
+    $('#capture-age').textContent = `${payload.retention.oldest_age_days} 天`;
+    const notices = [];
+    if (payload.retention.days_exceeded) notices.push('最早原始采集已超过 90 天。请人工决定是否清理。');
+    if (payload.retention.bytes_exceeded) notices.push('原始采集已超过 30GB。请人工决定是否清理。');
+    if (!notices.length) notices.push('当前未超过保留提示。工作台不会自动删除原始采集。');
+    $('#capture-retention').innerHTML = notices
+      .map((note) => `<div class="notice">${escapeHtml(note)}</div>`).join('');
+    renderCaptureItems($('#capture-bean-list'), payload.bean.items, 'bean');
+    renderCaptureItems($('#capture-boss-list'), payload.boss.items, 'boss');
+  } catch (error) {
+    toast(`读取采集统计失败：${error.message}`);
   }
 }
 
@@ -492,6 +537,7 @@ function renderJobMetrics(job) {
       <article><span>${escapeHtml(metricSet.split)} 图</span><strong>${metricSet.images}</strong></article>
       <article><span>Precision</span><strong>${Math.round(metricSet.precision * 100)}%</strong></article>
       <article><span>Recall</span><strong>${Math.round(metricSet.recall * 100)}%</strong></article>
+      <article><span>P95 延迟</span><strong>${metricSet.latency_ms_p95 ?? '—'} ms</strong></article>
       <article><span>best.pt</span><strong>${result.best_weight ? '已生成' : '—'}</strong></article>
     </div>
     <table class="metrics-table"><thead><tr><th>类别</th><th>P</th><th>R</th><th>阈值</th><th>TP/FP/FN</th></tr></thead><tbody>${rows}</tbody></table>`;
@@ -548,12 +594,99 @@ async function loadTrainingPage() {
   }
 }
 
+function renderService(service, active) {
+  $('#service-state').textContent = service?.running ? '运行中' : '未运行';
+  $('#service-detail').textContent = service?.running
+    ? `${service.model_version || active?.model_version || '?'} · ${service.gpu?.name || 'GPU'} · PID ${service.pid}`
+    : active?.model_version
+      ? `已激活 ${active.model_version}，模式 ${active.mode}`
+      : '尚未激活模型。';
+  $('#start-inference').disabled = !active?.model_version || Boolean(service?.running);
+  $('#stop-inference').disabled = !service?.running;
+}
+
+function renderModels(models, active) {
+  const container = $('#model-versions');
+  if (!models?.length) {
+    container.className = 'model-list empty';
+    container.textContent = '还没有通过验收并发布的模型';
+    return;
+  }
+  container.className = 'model-list';
+  container.innerHTML = models.map((model) => {
+    const test = model.metrics?.test || {};
+    return `
+      <div class="model-card${model.active ? ' active' : ''}">
+        <strong>${escapeHtml(model.version)}</strong>
+        <p>数据集 ${escapeHtml(model.dataset_version)} · ${(model.classes || []).length} 类</p>
+        <p>test P ${Math.round((test.precision || 0) * 100)}% · R ${Math.round((test.recall || 0) * 100)}% · P95 ${test.latency_ms_p95 ?? '—'}ms</p>
+        <div class="inline-actions">
+          <button class="text-button" data-activate-model="${escapeHtml(model.version)}">
+            ${model.active ? `已激活 · ${escapeHtml(model.mode)}` : '按当前模式激活'}
+          </button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function renderCandidates(candidates) {
+  const container = $('#model-candidates');
+  if (!candidates.length) {
+    container.className = 'model-list empty';
+    container.textContent = '暂无训练候选';
+    return;
+  }
+  container.className = 'model-list';
+  container.innerHTML = candidates.map(({ job, candidate }) => {
+    if (!candidate) {
+      return `<div class="model-card"><strong>${escapeHtml(job.id)}</strong><p>无法读取候选状态</p></div>`;
+    }
+    const failures = (candidate.failures || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+    return `
+      <div class="model-card">
+        <strong>${escapeHtml(job.id)}</strong>
+        <p>${escapeHtml(job.dataset_version)} · ${escapeHtml(job.model)}</p>
+        ${candidate.ready
+          ? '<p>已通过冻结 test，可发布。</p><div class="inline-actions"><button class="text-button" data-publish-job="${escapeHtml(job.id)}">发布并激活</button></div>'
+          : `<p>${escapeHtml(candidate.reason || '尚未达到发布条件')}</p>${failures ? `<ul class="candidate-failures">${failures}</ul>` : ''}`}
+      </div>`;
+  }).join('');
+}
+
+async function loadDeploymentPage() {
+  try {
+    const [deployment, training] = await Promise.all([
+      api('/api/deployment'),
+      api('/api/training?limit=100'),
+    ]);
+    state.deployment = deployment;
+    state.trainingJobs = training.items || [];
+    const active = deployment.active || {};
+    if (active.mode) $('#deploy-mode').value = active.mode;
+    renderService(deployment.service, active);
+    renderModels(deployment.models, active);
+    const trainJobs = state.trainingJobs.filter((job) => job.kind === 'train' && job.status === 'completed');
+    const candidates = await Promise.all(trainJobs.map(async (job) => {
+      try {
+        return { job, candidate: await api(`/api/models/${encodeURIComponent(job.id)}/candidate`) };
+      } catch (_) {
+        return { job, candidate: null };
+      }
+    }));
+    renderCandidates(candidates);
+  } catch (error) {
+    toast(`读取部署状态失败：${error.message}`);
+  }
+}
+
 $$('.step').forEach((button) => {
   button.addEventListener('click', () => {
     switchPage(button.dataset.page);
     if (button.dataset.page === 'review') loadReviewQueue(true);
+    if (button.dataset.page === 'capture') loadCapturePage();
     if (button.dataset.page === 'dataset') loadDatasetPage();
     if (button.dataset.page === 'training') loadTrainingPage();
+    if (button.dataset.page === 'deploy') loadDeploymentPage();
   });
 });
 $('#scan-button').addEventListener('click', scan);
@@ -736,6 +869,56 @@ $('#cancel-job').addEventListener('click', async () => {
     await refreshTraining(true);
   } catch (error) {
     toast(`取消失败：${error.message}`);
+  }
+});
+$('#refresh-deployment').addEventListener('click', loadDeploymentPage);
+$('#refresh-capture').addEventListener('click', loadCapturePage);
+$('#model-versions').addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-activate-model]');
+  if (!button) return;
+  try {
+    await api(`/api/models/${encodeURIComponent(button.dataset.activateModel)}/activate`, {
+      method: 'POST',
+      body: JSON.stringify({ mode: $('#deploy-mode').value }),
+    });
+    toast(`已激活 ${button.dataset.activateModel}（${$('#deploy-mode').value}）`);
+    await loadDeploymentPage();
+  } catch (error) {
+    toast(`激活失败：${error.message}`);
+  }
+});
+$('#model-candidates').addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-publish-job]');
+  if (!button) return;
+  button.disabled = true;
+  try {
+    const result = await api(`/api/models/${encodeURIComponent(button.dataset.publishJob)}/publish`, {
+      method: 'POST',
+      body: JSON.stringify({ mode: $('#deploy-mode').value }),
+    });
+    toast(`已发布并激活 ${result.version}`);
+    await loadDeploymentPage();
+  } catch (error) {
+    toast(`发布失败：${error.message}`);
+    button.disabled = false;
+  }
+});
+$('#start-inference').addEventListener('click', async () => {
+  try {
+    await api('/api/inference/start', { method: 'POST' });
+    toast('GPU 推理服务已启动。');
+    await loadDeploymentPage();
+  } catch (error) {
+    toast(`启动失败：${error.message}`);
+  }
+});
+$('#stop-inference').addEventListener('click', async () => {
+  try {
+    await api('/api/inference/stop', { method: 'POST' });
+    toast('GPU 推理服务已停止，OAS 将自动回退旧模型。');
+    await loadDeploymentPage();
+  } catch (error) {
+    toast(`停止失败：${error.message}`);
   }
 });
 

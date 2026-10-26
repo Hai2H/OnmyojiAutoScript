@@ -522,6 +522,70 @@ class Catalog:
             'boss_capture': str(self.paths.boss_capture),
         }
 
+    def capture_summary(self, recent_limit: int = 30) -> dict:
+        def folder_stats(folder: Path) -> tuple[int, int]:
+            files = [path for path in folder.rglob('*') if path.is_file()]
+            return len(files), sum(path.stat().st_size for path in files)
+
+        bean_rounds = []
+        for folder in _iter_directories(self.paths.bean_capture):
+            files, size = folder_stats(folder)
+            round_meta = _read_json(folder / 'round.json', {}) or {}
+            bean_rounds.append({
+                'round': folder.name,
+                'path': str(folder),
+                'files': files,
+                'bytes': size,
+                'frames_saved': round_meta.get('frames_saved'),
+                'status': round_meta.get('status'),
+                'created_at': round_meta.get('created_at'),
+            })
+        boss_rounds = []
+        for folder in _iter_directories(self.paths.boss_capture):
+            files, size = folder_stats(folder)
+            meta = _read_json(folder / 'meta.json', {}) or {}
+            boss_rounds.append({
+                'round': folder.name,
+                'path': str(folder),
+                'files': files,
+                'bytes': size,
+                'candidates': len(meta.get('entries') or []),
+                'status': meta.get('status'),
+                'created_at': meta.get('created_at'),
+            })
+        bean_bytes = sum(item['bytes'] for item in bean_rounds)
+        boss_bytes = sum(item['bytes'] for item in boss_rounds)
+        total_bytes = bean_bytes + boss_bytes
+        round_folders = [*_iter_directories(self.paths.bean_capture), *_iter_directories(self.paths.boss_capture)]
+        oldest_mtime = min((folder.stat().st_mtime for folder in round_folders), default=None)
+        oldest_age_days = (
+            round((datetime.now().timestamp() - oldest_mtime) / 86400, 1)
+            if oldest_mtime is not None else 0
+        )
+        return {
+            'bean': {
+                'rounds': len(bean_rounds),
+                'files': sum(item['files'] for item in bean_rounds),
+                'bytes': bean_bytes,
+                'items': sorted(bean_rounds, reverse=True, key=lambda item: item['round'])[:recent_limit],
+            },
+            'boss': {
+                'rounds': len(boss_rounds),
+                'files': sum(item['files'] for item in boss_rounds),
+                'bytes': boss_bytes,
+                'items': sorted(boss_rounds, reverse=True, key=lambda item: item['round'])[:recent_limit],
+            },
+            'total_bytes': total_bytes,
+            'retention': {
+                'days': 90,
+                'bytes': 30 * 1024 ** 3,
+                'oldest_age_days': oldest_age_days,
+                'days_exceeded': oldest_age_days >= 90,
+                'bytes_exceeded': total_bytes >= 30 * 1024 ** 3,
+                'automatic_delete': False,
+            },
+        }
+
     @staticmethod
     def _event_payload(row: sqlite3.Row) -> dict:
         payload = dict(row)

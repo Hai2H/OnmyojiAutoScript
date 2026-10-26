@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from .paths import WorkspacePaths
 from .store import WorkbenchStore
 from .dataset import DatasetBuilder
+from .deployment import InferenceServiceManager, ModelPublisher
 from .training_manager import TrainingManager
 
 
@@ -49,11 +50,21 @@ class TrainingTestRequest(BaseModel):
     batch: int = 4
 
 
+class PublishRequest(BaseModel):
+    mode: str = 'shadow'
+
+
+class ActivateModelRequest(BaseModel):
+    mode: str = 'shadow'
+
+
 def create_app(paths: WorkspacePaths | None = None) -> FastAPI:
     workspace = paths or WorkspacePaths()
     workspace.ensure()
     scan_lock = threading.Lock()
     training = TrainingManager(workspace)
+    publisher = ModelPublisher(workspace)
+    inference = InferenceServiceManager(workspace)
 
     app = FastAPI(title='百鬼夜行训练工作台', version='0.1.0')
 
@@ -122,6 +133,11 @@ def create_app(paths: WorkspacePaths | None = None) -> FastAPI:
                 limit=limit,
                 offset=offset,
             )
+
+    @app.get('/api/capture')
+    def capture() -> dict:
+        with open_store() as catalog:
+            return catalog.capture_summary()
 
     @app.get('/api/events/{event_id}')
     def event_detail(event_id: str) -> dict:
@@ -243,6 +259,49 @@ def create_app(paths: WorkspacePaths | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail='训练任务不存在') from exception
         except ValueError as exception:
             raise HTTPException(status_code=422, detail=str(exception)) from exception
+
+    @app.get('/api/deployment')
+    def deployment() -> dict:
+        return {
+            'models': publisher.list_models(),
+            'active': publisher.active(),
+            'service': inference.health(),
+            'gates': {'precision': .95, 'recall': .90, 'latency_ms_p95': 180},
+        }
+
+    @app.get('/api/models/{train_job_id}/candidate')
+    def model_candidate(train_job_id: str) -> dict:
+        try:
+            return publisher.inspect_candidate(train_job_id)
+        except KeyError as exception:
+            raise HTTPException(status_code=404, detail='训练任务不存在') from exception
+
+    @app.post('/api/models/{train_job_id}/publish')
+    def publish_model(train_job_id: str, request: PublishRequest) -> dict:
+        try:
+            return publisher.publish(train_job_id, mode=request.mode)
+        except KeyError as exception:
+            raise HTTPException(status_code=404, detail='训练任务不存在') from exception
+        except ValueError as exception:
+            raise HTTPException(status_code=422, detail=str(exception)) from exception
+
+    @app.post('/api/models/{version}/activate')
+    def activate_model(version: str, request: ActivateModelRequest) -> dict:
+        try:
+            return publisher.set_active(version, request.mode)
+        except ValueError as exception:
+            raise HTTPException(status_code=422, detail=str(exception)) from exception
+
+    @app.post('/api/inference/start')
+    def start_inference() -> dict:
+        try:
+            return inference.start()
+        except ValueError as exception:
+            raise HTTPException(status_code=422, detail=str(exception)) from exception
+
+    @app.post('/api/inference/stop')
+    def stop_inference() -> dict:
+        return inference.stop()
 
     @app.get('/api/xany')
     def xany_config() -> dict:

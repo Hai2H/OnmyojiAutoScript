@@ -1,0 +1,412 @@
+{
+  "generated_at": "2026-10-25",
+  "source": "https://wiki.biligame.com/yys (BWIKI, Semantic MediaWiki ask API)",
+  "model_package": "oashya 0.0.7 (2024-06-25), 219 classes",
+  "model_latest_units": {
+    "SP": "福悦座敷童子 / 鲸汐千姬 (2024-02-07)",
+    "SSR": "泷 (2024-01-10)"
+  },
+  "cutoff": "2024-02-07",
+  "counts": {
+    "UR": 2,
+    "SP": 16,
+    "SSR": 30,
+    "SR": 1,
+    "R": 0
+  },
+  "total_missing": 49,
+  "units": [
+    {
+      "rarity": "SSR",
+      "date": "2024-03-06",
+      "name": "初音未来",
+      "collab": true,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E5%88%9D%E9%9F%B3%E6%9C%AA%E6%9D%A5"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2024-03-06",
+      "name": "镜音铃·连",
+      "collab": true,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E9%95%9C%E9%9F%B3%E9%93%83%C2%B7%E8%BF%9E"
+    },
+    {
+      "rarity": "SP",
+      "date": "2024-04-03",
+      "name": "晨晖惠比寿",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E6%99%A8%E6%99%96%E6%83%A0%E6%AF%94%E5%AF%BF"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2024-04-24",
+      "name": "申屠子夜",
+      "collab": true,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E7%94%B3%E5%B1%A0%E5%AD%90%E5%A4%9C"
+    },
+    {
+      "rarity": "SP",
+      "date": "2024-05-22",
+      "name": "龙吟铃鹿御前",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E9%BE%99%E5%90%9F%E9%93%83%E9%B9%BF%E5%BE%A1%E5%89%8D"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2024-06-19",
+      "name": "猫川",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E7%8C%AB%E5%B7%9D"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2024-07-17",
+      "name": "祸津神",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E7%A5%B8%E6%B4%A5%E7%A5%9E"
+    },
+    {
+      "rarity": "SP",
+      "date": "2024-08-14",
+      "name": "遥念烟烟罗",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E9%81%A5%E5%BF%B5%E7%83%9F%E7%83%9F%E7%BD%97"
+    },
+    {
+      "rarity": "SP",
+      "date": "2024-09-11",
+      "name": "心友犬神",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E5%BF%83%E5%8F%8B%E7%8A%AC%E7%A5%9E"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2024-09-11",
+      "name": "龙珏",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E9%BE%99%E7%8F%8F"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2024-10-09",
+      "name": "封阳君",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E5%B0%81%E9%98%B3%E5%90%9B"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2024-11-06",
+      "name": "鬼金羊",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E9%AC%BC%E9%87%91%E7%BE%8A"
+    },
+    {
+      "rarity": "SP",
+      "date": "2024-12-04",
+      "name": "神酿星熊童子",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E7%A5%9E%E9%85%BF%E6%98%9F%E7%86%8A%E7%AB%A5%E5%AD%90"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2024-12-31",
+      "name": "夏目&猫老师",
+      "collab": true,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E5%A4%8F%E7%9B%AE%26%E7%8C%AB%E8%80%81%E5%B8%88"
+    },
+    {
+      "rarity": "SP",
+      "date": "2025-01-22",
+      "name": "晴思日和坊",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E6%99%B4%E6%80%9D%E6%97%A5%E5%92%8C%E5%9D%8A"
+    },
+    {
+      "rarity": "SP",
+      "date": "2025-01-22",
+      "name": "瑶音紧那罗",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E7%91%B6%E9%9F%B3%E7%B4%A7%E9%82%A3%E7%BD%97"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2025-02-26",
+      "name": "歌留多",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E6%AD%8C%E7%95%99%E5%A4%9A"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2025-03-26",
+      "name": "巡音流歌",
+      "collab": true,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E5%B7%A1%E9%9F%B3%E6%B5%81%E6%AD%8C"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2025-04-23",
+      "name": "卑弥呼",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E5%8D%91%E5%BC%A5%E5%91%BC"
+    },
+    {
+      "rarity": "SP",
+      "date": "2025-05-21",
+      "name": "时曜泷夜叉姬",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E6%97%B6%E6%9B%9C%E6%B3%B7%E5%A4%9C%E5%8F%89%E5%A7%AC"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2025-06-18",
+      "name": "荒骷髅",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E8%8D%92%E9%AA%B7%E9%AB%85"
+    },
+    {
+      "rarity": "SP",
+      "date": "2025-07-16",
+      "name": "云间不见岳",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E4%BA%91%E9%97%B4%E4%B8%8D%E8%A7%81%E5%B2%B3"
+    },
+    {
+      "rarity": "SR",
+      "date": "2025-07-30",
+      "name": "湍津姬",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E6%B9%8D%E6%B4%A5%E5%A7%AC"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2025-08-13",
+      "name": "木之本樱",
+      "collab": true,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E6%9C%A8%E4%B9%8B%E6%9C%AC%E6%A8%B1"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2025-08-13",
+      "name": "李小狼",
+      "collab": true,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E6%9D%8E%E5%B0%8F%E7%8B%BC"
+    },
+    {
+      "rarity": "SP",
+      "date": "2025-09-10",
+      "name": "妙主九命猫",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E5%A6%99%E4%B8%BB%E4%B9%9D%E5%91%BD%E7%8C%AB"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2025-09-10",
+      "name": "雪御前",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E9%9B%AA%E5%BE%A1%E5%89%8D"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2025-10-10",
+      "name": "平将门",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E5%B9%B3%E5%B0%86%E9%97%A8"
+    },
+    {
+      "rarity": "UR",
+      "date": "2025-10-29",
+      "name": "妖刀姬·绯夜猎刃",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E5%A6%96%E5%88%80%E5%A7%AC%C2%B7%E7%BB%AF%E5%A4%9C%E7%8C%8E%E5%88%83"
+    },
+    {
+      "rarity": "SP",
+      "date": "2025-11-19",
+      "name": "梦引蝴蝶精",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E6%A2%A6%E5%BC%95%E8%9D%B4%E8%9D%B6%E7%B2%BE"
+    },
+    {
+      "rarity": "SP",
+      "date": "2025-12-17",
+      "name": "梦山白藏主",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E6%A2%A6%E5%B1%B1%E7%99%BD%E8%97%8F%E4%B8%BB"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2026-01-01",
+      "name": "刻世命",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E5%88%BB%E4%B8%96%E5%91%BD"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2026-01-01",
+      "name": "月城雪兔&月",
+      "collab": true,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E6%9C%88%E5%9F%8E%E9%9B%AA%E5%85%94%26%E6%9C%88"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2026-01-01",
+      "name": "知世&小可",
+      "collab": true,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E7%9F%A5%E4%B8%96%26%E5%B0%8F%E5%8F%AF"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2026-01-14",
+      "name": "神无月",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E7%A5%9E%E6%97%A0%E6%9C%88"
+    },
+    {
+      "rarity": "SP",
+      "date": "2026-02-11",
+      "name": "灼华桃花妖",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E7%81%BC%E5%8D%8E%E6%A1%83%E8%8A%B1%E5%A6%96"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2026-02-11",
+      "name": "葛叶",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E8%91%9B%E5%8F%B6"
+    },
+    {
+      "rarity": "SP",
+      "date": "2026-03-11",
+      "name": "蚀月吸血姬",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E8%9A%80%E6%9C%88%E5%90%B8%E8%A1%80%E5%A7%AC"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2026-04-01",
+      "name": "市加美",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E5%B8%82%E5%8A%A0%E7%BE%8E"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2026-04-29",
+      "name": "思金神",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E6%80%9D%E9%87%91%E7%A5%9E"
+    },
+    {
+      "rarity": "SP",
+      "date": "2026-05-27",
+      "name": "天火命铃彦姬",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E5%A4%A9%E7%81%AB%E5%91%BD%E9%93%83%E5%BD%A6%E5%A7%AC"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2026-06-24",
+      "name": "毗沙门天",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E6%AF%97%E6%B2%99%E9%97%A8%E5%A4%A9"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2026-07-22",
+      "name": "不相狐禅",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E4%B8%8D%E7%9B%B8%E7%8B%90%E7%A6%85"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2026-08-19",
+      "name": "洛天依",
+      "collab": true,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E6%B4%9B%E5%A4%A9%E4%BE%9D"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2026-08-19",
+      "name": "言和",
+      "collab": true,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E8%A8%80%E5%92%8C"
+    },
+    {
+      "rarity": "SP",
+      "date": "2026-09-09",
+      "name": "百羽凤凰火",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E7%99%BE%E7%BE%BD%E5%87%A4%E5%87%B0%E7%81%AB"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2026-09-09",
+      "name": "石长姬",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E7%9F%B3%E9%95%BF%E5%A7%AC"
+    },
+    {
+      "rarity": "SSR",
+      "date": "2026-10-10",
+      "name": "咲耶",
+      "collab": false,
+      "upcoming": false,
+      "wiki": "https://wiki.biligame.com/yys/%E5%92%B2%E8%80%B6"
+    },
+    {
+      "rarity": "UR",
+      "date": "2026-10-28",
+      "name": "大天狗·高天铁羽",
+      "collab": false,
+      "upcoming": true,
+      "wiki": "https://wiki.biligame.com/yys/%E5%A4%A7%E5%A4%A9%E7%8B%97%C2%B7%E9%AB%98%E5%A4%A9%E9%93%81%E7%BE%BD"
+    }
+  ]
+}

@@ -435,6 +435,49 @@ main { max-width: 1450px; margin: 0 auto; padding: 28px clamp(20px, 4vw, 64px) 7
   font: 11px/1.55 Consolas, monospace;
   white-space: pre-wrap;
 }
+.deployment-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, .75fr) minmax(320px, 1fr) minmax(320px, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.service-panel select {
+  width: 100%;
+  margin-top: 6px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0f141a;
+  color: var(--text);
+}
+.deploy-actions { margin-top: 14px; }
+.model-list { display: grid; gap: 9px; }
+.model-list.empty { min-height: 180px; place-content: center; color: var(--muted); text-align: center; }
+.model-card {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #131a21;
+}
+.model-card.active { border-color: #3f8768; box-shadow: inset 3px 0 #37a26f; }
+.model-card strong { display: block; margin-bottom: 6px; font-size: 12px; overflow-wrap: anywhere; }
+.model-card p { margin: 5px 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.model-card .inline-actions { margin-top: 9px; }
+.candidate-failures { margin: 7px 0; padding-left: 18px; color: #e5b5b5; font-size: 11px; line-height: 1.55; }
+.capture-list { display: grid; gap: 7px; max-height: 420px; overflow: auto; }
+.capture-list.empty { min-height: 150px; place-content: center; color: var(--muted); }
+.capture-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #131a21;
+  font-size: 11px;
+}
+.capture-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.capture-row span { color: var(--muted); }
 #toast {
   position: fixed;
   right: 24px;
@@ -460,6 +503,7 @@ main { max-width: 1450px; margin: 0 auto; padding: 28px clamp(20px, 4vw, 64px) 7
   .review-layout { grid-template-columns: 1fr; }
   .dataset-layout { grid-template-columns: 1fr; }
   .training-layout { grid-template-columns: 1fr; }
+  .deployment-layout { grid-template-columns: 1fr; }
   .review-queue, .review-actions { max-height: none; }
   .review-list { max-height: 320px; }
 }

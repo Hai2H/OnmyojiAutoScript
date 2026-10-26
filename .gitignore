@@ -281,3 +281,5 @@ data/hyakki_workbench/
 runs/hyakki_workbench/
 log/workbench/
 weights/hyakkiyakou/
+.venv-train/
+.venv-infer/

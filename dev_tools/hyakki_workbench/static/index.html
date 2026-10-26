@@ -66,11 +66,31 @@
     </section>
 
     <section id="page-capture" class="page">
-      <article class="panel placeholder">
-        <p class="eyebrow">CAPTURE</p>
-        <h2>采集页</h2>
-        <p>下一步会加入局数、磁盘占用、保留期限和重复帧统计。</p>
-      </article>
+      <div class="review-header">
+        <div>
+          <p class="eyebrow">CAPTURE STORAGE</p>
+          <h2>采集数据</h2>
+          <p class="hint">只统计现有采集目录，不自动删除。默认保留 90 天或累计 30GB，先到者提示。</p>
+        </div>
+        <button id="refresh-capture" class="button">刷新统计</button>
+      </div>
+      <div class="metrics">
+        <article><span>撒豆局数</span><strong id="capture-bean">—</strong></article>
+        <article><span>鬼王局数</span><strong id="capture-boss">—</strong></article>
+        <article><span>总占用</span><strong id="capture-size">—</strong></article>
+        <article><span>最早数据年龄</span><strong id="capture-age">—</strong></article>
+      </div>
+      <div id="capture-retention" class="notice-list"></div>
+      <div class="grid two">
+        <article class="panel">
+          <h3>撒豆采集</h3>
+          <div id="capture-bean-list" class="capture-list empty">正在读取…</div>
+        </article>
+        <article class="panel">
+          <h3>鬼王候选</h3>
+          <div id="capture-boss-list" class="capture-list empty">正在读取…</div>
+        </article>
+      </div>
     </section>
     <section id="page-review" class="page">
       <div class="review-header">
@@ -243,11 +263,44 @@
       </div>
     </section>
     <section id="page-deploy" class="page">
-      <article class="panel placeholder">
-        <p class="eyebrow">DEPLOY</p>
-        <h2>上线与回退页</h2>
-        <p>旧模型、旁路、补充、新模型优先四种模式及快速回退。</p>
-      </article>
+      <div class="review-header">
+        <div>
+          <p class="eyebrow">DEPLOY &amp; ROLLBACK</p>
+          <h2>新旧模型共存</h2>
+          <p class="hint">旧模型始终保留。只有完成冻结 test，每类达到 Precision 95% / Recall 90%，且 P95 延迟不超过 180ms 的候选才能发布。</p>
+        </div>
+        <button id="refresh-deployment" class="button">刷新部署状态</button>
+      </div>
+      <div class="deployment-layout">
+        <article class="panel service-panel">
+          <div class="panel-title">
+            <h3>GPU 推理服务</h3>
+            <span id="service-state" class="status-chip">未运行</span>
+          </div>
+          <p id="service-detail" class="muted small">激活模型后可启动。</p>
+          <label class="field-label" for="deploy-mode">当前运行模式</label>
+          <select id="deploy-mode">
+            <option value="old">旧模型</option>
+            <option value="shadow">旁路记录</option>
+            <option value="assist">新模型补充</option>
+            <option value="primary">新模型优先</option>
+          </select>
+          <div class="inline-actions deploy-actions">
+            <button id="start-inference" class="button primary">启动服务</button>
+            <button id="stop-inference" class="button">停止服务</button>
+          </div>
+        </article>
+
+        <article class="panel">
+          <h3>已发布模型</h3>
+          <div id="model-versions" class="model-list empty">还没有通过验收并发布的模型</div>
+        </article>
+
+        <article class="panel deploy-candidates">
+          <h3>待发布候选</h3>
+          <div id="model-candidates" class="model-list empty">暂无训练候选</div>
+        </article>
+      </div>
     </section>
   </main>
 
