@@ -461,8 +461,8 @@ function reviewQuery(filter) {
   else if (filter === 'pending') query = 'status=pending,needs_label';
   else if (filter === 'unknown') query = 'status=unknown,needs_label';
   else query = 'status=correct,changed,unknown';
-  const classId = $('#review-class-filter')?.value;
-  if (classId) query += `&class_id=${encodeURIComponent(classId)}`;
+  const rarity = $('#review-rarity-filter')?.value;
+  if (rarity) query += `&rarity=${encodeURIComponent(rarity)}`;
   return `/api/events?${query}&limit=200`;
 }
 
@@ -563,7 +563,6 @@ async function ensureClasses() {
   const payload = await api('/api/classes?limit=500');
   state.classes = payload.items || [];
   renderClassOptions();
-  renderReviewClassFilter();
 }
 
 function renderClassOptions() {
@@ -577,16 +576,6 @@ function renderClassOptions() {
   `).join('');
   $('#class-select').value = '';
   state.reviewSelectedClassId = null;
-}
-
-function renderReviewClassFilter() {
-  const select = $('#review-class-filter');
-  if (!select) return;
-  const selected = select.value;
-  select.innerHTML = '<option value="">全部式神</option>' + (state.classes || []).map((item) => `
-    <option value="${item.class_id}">${escapeHtml(item.rarity)} · ${escapeHtml(item.name)} · ${escapeHtml(item.label)}</option>
-  `).join('');
-  select.value = selected;
 }
 
 async function selectReviewEvent(eventId) {
@@ -1063,7 +1052,7 @@ $('#review-filters').addEventListener('click', (event) => {
   $$('#review-filters button').forEach((item) => item.classList.toggle('active', item === button));
   loadReviewQueue(true);
 });
-$('#review-class-filter').addEventListener('change', () => {
+$('#review-rarity-filter').addEventListener('change', () => {
   loadReviewQueue(true);
 });
 $('#review-list').addEventListener('click', (event) => {
