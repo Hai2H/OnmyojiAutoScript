@@ -75,6 +75,8 @@ class Agent:
         self.auto_bean: bool = strategy.get('auto_bean', False)
         #
         self.last_throw_time = datetime.now()
+        # Estimated screenshot-to-click lead time, refreshed by ScriptTask each frame.
+        self.lead_ms: float = 100.0
         self.dbg_throw: int = 0
         self.dbg_throw_n: int = 0
 
@@ -145,6 +147,7 @@ class Agent:
         self.check_observe(tracks=tracks)
         if self.focus is None:
             return not_decision
+        self.strategy['lead_ms'] = max(60.0, min(180.0, float(self.lead_ms) + 25.0))
         result = self.focus.decision(tracks=tracks, strategy=self.strategy, state=[delta_time] + state, freeze=freeze)
         if result[2]:
             self.last_throw_time = new_time

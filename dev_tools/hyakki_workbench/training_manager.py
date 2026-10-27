@@ -151,9 +151,10 @@ class TrainingManager:
         model: str = 'yolo11s.pt',
         epochs: int = 100,
         imgsz: int = 960,
-        batch: int = 4,
+        batch: int = 8,
         patience: int = 20,
         workers: int = 0,
+        cache: str = 'ram',
     ) -> dict:
         if model not in {'yolo11n.pt', 'yolo11s.pt'}:
             raise ValueError('V1 只允许 yolo11n.pt 或 yolo11s.pt')
@@ -165,6 +166,8 @@ class TrainingManager:
             raise ValueError('batch 必须在 1～32')
         if not 0 <= int(workers) <= 8:
             raise ValueError('workers 必须在 0～8')
+        if cache not in {'none', 'ram', 'disk'}:
+            raise ValueError('cache 必须是 none、ram 或 disk')
         python = self.paths.train_python
         if not python.is_file():
             raise ValueError(f'训练环境不存在：{python}')
@@ -193,6 +196,7 @@ class TrainingManager:
                     'batch': int(batch),
                     'patience': int(patience),
                     'workers': int(workers),
+                    'cache': cache,
                     'device': '0',
                     'amp': True,
                 }
@@ -231,11 +235,12 @@ class TrainingManager:
                 '--batch', str(batch),
                 '--patience', str(patience),
                 '--workers', str(workers),
+                '--cache', cache,
             ]
             self._launch(job_id, command, run_dir)
         return self.get_job(job_id)
 
-    def start_test(self, parent_job_id: str, *, imgsz: int = 960, batch: int = 4) -> dict:
+    def start_test(self, parent_job_id: str, *, imgsz: int = 960, batch: int = 8) -> dict:
         parent = self.get_job(parent_job_id)
         if parent['kind'] != 'train' or parent['status'] != 'completed':
             raise ValueError('只有已完成的训练任务才能进入最终测试')

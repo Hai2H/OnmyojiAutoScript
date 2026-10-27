@@ -207,6 +207,7 @@ def run_train(args) -> dict:
     run_dir = Path(args.run_dir).resolve()
     project = run_dir.parent
     workers_used = int(args.workers)
+    cache_mode = False if args.cache == 'none' else args.cache
     fallback_used = False
 
     def start_training(workers: int, resume: bool = False):
@@ -227,6 +228,7 @@ def run_train(args) -> dict:
             exist_ok=True,
             patience=args.patience,
             workers=workers,
+            cache=cache_mode,
             seed=0,
             deterministic=True,
             plots=True,
@@ -318,9 +320,10 @@ def main() -> int:
     train.add_argument('--model', default='yolo11s.pt')
     train.add_argument('--epochs', type=int, default=100)
     train.add_argument('--imgsz', type=int, default=960)
-    train.add_argument('--batch', type=int, default=4)
+    train.add_argument('--batch', type=int, default=8)
     train.add_argument('--patience', type=int, default=20)
     train.add_argument('--workers', type=int, default=0)
+    train.add_argument('--cache', choices=('none', 'ram', 'disk'), default='ram')
     test = sub.add_parser('test')
     test.add_argument('--job-id', required=True)
     test.add_argument('--data', required=True)
@@ -328,7 +331,7 @@ def main() -> int:
     test.add_argument('--weight', required=True)
     test.add_argument('--thresholds', required=True)
     test.add_argument('--imgsz', type=int, default=960)
-    test.add_argument('--batch', type=int, default=4)
+    test.add_argument('--batch', type=int, default=8)
     export = sub.add_parser('export')
     export.add_argument('--job-id', required=True)
     export.add_argument('--run-dir', required=True)

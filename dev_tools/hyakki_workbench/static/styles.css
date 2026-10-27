@@ -357,6 +357,14 @@ main { max-width: 1450px; margin: 0 auto; padding: 28px clamp(20px, 4vw, 64px) 7
 .class-table td { padding: 9px 8px; border-bottom: 1px solid #24303a; }
 .class-table tr.selected td { background: rgba(47, 113, 83, .1); }
 .class-table input { accent-color: var(--accent-strong); }
+.dataset-samples-row td { padding: 10px 12px; background: #111820; }
+.dataset-samples { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 9px; }
+.dataset-sample { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 8px; align-items: center; padding: 7px; border: 1px solid var(--line); border-radius: 6px; }
+.dataset-sample img { width: 88px; aspect-ratio: 16 / 9; object-fit: cover; background: #090d11; }
+.dataset-sample > div { min-width: 0; display: grid; gap: 4px; }
+.dataset-sample strong, .dataset-sample span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dataset-sample span { color: var(--muted); font-size: 10px; }
+.dataset-sample button, .dataset-sample > .muted { grid-column: 2; justify-self: start; }
 .gate { padding: 3px 7px; border-radius: 999px; font-size: 10px; }
 .gate.train { color: #bfdbfe; background: rgba(59, 130, 246, .17); }
 .gate.pilot { color: #ddd6fe; background: rgba(139, 92, 246, .17); }

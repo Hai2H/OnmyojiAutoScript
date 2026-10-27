@@ -109,6 +109,8 @@ class WorkbenchCatalogTest(unittest.TestCase):
             self.assertGreater(capture['total_bytes'], 0)
             high_page = store.list_events(rarity='SSR,SP,UR')
             self.assertEqual(high_page['total'], 2)
+            pending_high_page = store.list_events(pending_high_only=True)
+            self.assertEqual(pending_high_page['total'], 2)
             raw_page = store.list_raw_frames(filter_name='all')
             self.assertEqual(raw_page['total'], 2)
             raw_id = 'raw:bean:2026-10-26_12-00-00_r001:frame_000002'
@@ -120,6 +122,7 @@ class WorkbenchCatalogTest(unittest.TestCase):
             raw_package = store.prepare_raw_label_package(raw_id)
             raw_annotation = Path(raw_package['annotation'])
             raw_payload = json.loads(raw_annotation.read_text(encoding='utf-8'))
+            self.assertTrue(all('description' not in shape for shape in raw_payload['shapes']))
             raw_payload['shapes'].append({
                 'label': 'sp_051 百羽凤凰火',
                 'points': [[20, 30], [120, 150]],
@@ -135,6 +138,8 @@ class WorkbenchCatalogTest(unittest.TestCase):
             reviewed = store.review_event('bean:2026-10-26_12-00-00_r001:7', action='correct')
             self.assertEqual(reviewed['status'], 'correct')
             self.assertEqual(reviewed['reviewed_label'], 'ssr_075')
+            self.assertEqual(store.list_events(class_id=265)['total'], 1)
+            self.assertEqual(store.list_events(pending_high_only=True)['total'], 1)
             self.assertEqual(store.review_history(reviewed['id'])[0]['action'], 'correct')
 
             candidates = store.list_classes(query='百羽凤凰火')
@@ -147,6 +152,7 @@ class WorkbenchCatalogTest(unittest.TestCase):
             )
             self.assertEqual(changed['status'], 'changed')
             self.assertEqual(changed['reviewed_label'], 'sp_051')
+            self.assertEqual(store.list_events(class_id=candidates[0]['class_id'])['total'], 1)
 
             package = store.prepare_label_package(reviewed['id'])
             self.assertTrue((Path(package['folder']) / 'classes.txt').is_file())
@@ -156,6 +162,7 @@ class WorkbenchCatalogTest(unittest.TestCase):
             boss_package = store.prepare_label_package(changed['id'])
             annotation_path = Path(boss_package['files'][0]['annotation'])
             annotation = json.loads(annotation_path.read_text(encoding='utf-8'))
+            self.assertTrue(all('description' not in shape for shape in annotation['shapes']))
             annotation['shapes'] = [{
                 'label': 'sp_051 百羽凤凰火',
                 'points': [[20, 30], [120, 150]],
@@ -166,6 +173,19 @@ class WorkbenchCatalogTest(unittest.TestCase):
             self.assertEqual(imported['imported'], 1)
             self.assertEqual(imported['event']['reviewed_label'], 'sp_051')
             self.assertEqual(store.frame_labels(changed['id'])[0]['box']['x1'], 20.0)
+            sp_readiness = next(
+                row for row in DatasetBuilder(store).readiness()['classes']
+                if row['class_id'] == candidates[0]['class_id']
+            )
+            self.assertEqual(len(sp_readiness['samples']), 2)
+            self.assertTrue(any(
+                sample['source'] == '人工标注框' and sample['event_id'] == changed['id']
+                for sample in sp_readiness['samples']
+            ))
+            self.assertTrue(any(
+                sample['source'] == '盲扫人工框'
+                for sample in sp_readiness['samples']
+            ))
         finally:
             store.close()
 
@@ -198,6 +218,35 @@ class WorkbenchCatalogTest(unittest.TestCase):
         finally:
             store.close()
 
+    def test_high_rarity_seen_in_any_track_frame_requires_review(self) -> None:
+        bean_root = self.root / 'bean_capture'
+        round_root = bean_root / 'round_mixed_rarity'
+        rows = []
+        for index, class_id in enumerate([0, 0, 0, 265], start=1):
+            frame = f'frame_{index:06d}'
+            write_image(round_root / 'raw' / f'{frame}.jpg')
+            rows.append({
+                'frame': frame,
+                'tracks': [[7, class_id, 0.9, 160, 90, 80, 120, 0.1]],
+            })
+        (round_root / 'frames.jsonl').write_text(
+            '\n'.join(json.dumps(row) for row in rows) + '\n',
+            encoding='utf-8',
+        )
+
+        store = WorkbenchStore.open(self.paths(bean_root, self.root / 'boss_capture'))
+        try:
+            result = store.scan()
+            event = store.get_event('bean:round_mixed_rarity:7')
+            self.assertEqual(event['old_class_id'], 0)
+            self.assertIn('high_rarity', event['suspicion'])
+            self.assertIn(265, event['metadata']['high_rarity_class_ids'])
+            self.assertEqual(result.high_rarity_events, 1)
+            self.assertEqual(store.list_events(pending_high_only=True)['total'], 1)
+            self.assertEqual(store.summary()['pending_high_rarity'], 1)
+        finally:
+            store.close()
+
     def test_dataset_build_uses_reviewed_events_and_round_split(self) -> None:
         bean_root = self.root / 'bean_capture'
         event_ids = []
@@ -220,6 +269,7 @@ class WorkbenchCatalogTest(unittest.TestCase):
         store = WorkbenchStore.open(self.paths(bean_root, self.root / 'boss_capture'))
         try:
             store.scan()
+            self.assertEqual(DatasetBuilder(store).readiness()['reviewed_events'], 0)
             raw_id = 'raw:bean:round_a:frame_000001'
             raw_package = store.prepare_raw_label_package(raw_id)
             raw_annotation = Path(raw_package['annotation'])
@@ -242,7 +292,7 @@ class WorkbenchCatalogTest(unittest.TestCase):
             self.assertEqual(readiness['reviewed_events'], 20)
             self.assertEqual(readiness['manual_frames'], 1)
             event_class = next(row for row in readiness['classes'] if row['label'] == 'ssr_075')
-            self.assertEqual(event_class['box_ready_events'], 20)
+            self.assertEqual(event_class['box_ready_events'], 11)
             self.assertEqual(event_class['manual_frames'], 1)
             manual_class = next(row for row in readiness['classes'] if row['label'] == 'sp_051')
             self.assertEqual(manual_class['manual_frames'], 1)
@@ -251,8 +301,23 @@ class WorkbenchCatalogTest(unittest.TestCase):
             target = Path(result['path'])
             self.assertTrue((target / 'data.yaml').is_file())
             self.assertTrue((target / 'manifest.json').is_file())
-            self.assertEqual(result['manifest']['stats']['positive_images'], 20)
+            self.assertEqual(result['manifest']['stats']['positive_images'], 2)
             self.assertEqual(result['manifest']['stats']['manual_positive_images'], 1)
+            self.assertEqual(result['manifest']['stats']['boxes'], 12)
+            self.assertIn(
+                manual_class['class_id'],
+                {item['class_id'] for item in result['manifest']['classes']},
+            )
+            manual_row = next(
+                item for item in result['manifest']['samples']
+                if item['label_source'] == 'raw_frame_xanylabeling'
+            )
+            manual_label = target / manual_row['dataset_label']
+            self.assertEqual(len(manual_label.read_text(encoding='utf-8').splitlines()), 2)
+            self.assertEqual(
+                len(list((target / 'images').rglob('*.jpg'))),
+                2,
+            )
             self.assertTrue(any(
                 item['reason'] == 'superseded_by_manual_annotation'
                 for item in result['manifest']['excluded']
@@ -355,9 +420,22 @@ class WorkbenchCatalogTest(unittest.TestCase):
             self.assertEqual(result['imported_shapes'], 2)
             self.assertEqual(store.list_raw_frames(filter_name='candidate')['total'], 0)
             self.assertEqual(store.list_raw_frames(filter_name='annotated')['total'], 2)
+            current = Path(batch['folder'])
+            current_manifest = json.loads(
+                (current / 'manifest.json').read_text(encoding='utf-8')
+            )
+            self.assertEqual(current_manifest['items'], [])
+            self.assertEqual(list(current.glob('*.jpg')), [])
+            self.assertEqual(
+                [path for path in current.glob('*.json') if path.name != 'manifest.json'],
+                [],
+            )
+            archive = current.parent / 'archive'
+            self.assertEqual(len(list(archive.glob('*/*.jpg'))), 2)
+            self.assertEqual(len(list(archive.glob('*/*.json'))), 2)
             unchanged = store.prepare_raw_batch()
             self.assertTrue(unchanged['unchanged'])
-            self.assertEqual(unchanged['items'], 2)
+            self.assertEqual(unchanged['items'], 0)
         finally:
             store.close()
 

@@ -95,14 +95,14 @@ class BeanCapture:
         target.write_text('\n'.join(lines) + '\n', encoding='utf-8')
 
     # ------------------------------------------------------------------ 每帧
-    def tick(self, image, tracks, phase: str = 'running') -> None:
+    def tick(self, image, tracks, phase: str = 'running', state=None, action=None) -> None:
         """在主循环里每帧调用一次；内部自己决定存不存，异常不外抛。"""
         try:
-            self._tick(image, tracks or [], phase)
+            self._tick(image, tracks or [], phase, state, action)
         except Exception as exception:
             logger.warning(f'Bean capture failed: {exception}')
 
-    def _tick(self, image, tracks, phase: str) -> None:
+    def _tick(self, image, tracks, phase: str, state=None, action=None) -> None:
         if self.folder is None:
             self.begin_round()
         self.count += 1
@@ -125,6 +125,8 @@ class BeanCapture:
             'frame': name,
             'captured_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'phase': phase,
+            'state': list(state) if state is not None else None,
+            'action': list(action) if action is not None else None,
             'tracks': [[int(t[0]), int(t[1]), round(float(t[2]), 4),
                         int(t[3]), int(t[4]), int(t[5]), int(t[6]), round(float(t[7]), 4)]
                        for t in tracks],

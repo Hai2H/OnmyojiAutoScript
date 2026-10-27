@@ -202,14 +202,20 @@
         <div>
           <p class="eyebrow">REVIEW EVENTS</p>
           <h2>确认这一次出现</h2>
-          <p class="hint">预标注不是真值。先确认具体式神；需要补框或漏框时再送入 X-AnyLabeling。</p>
+          <p class="hint">所有检测到的 SSR / SP / UR 候选都要人工确定。只有人工确认或改正类别的事件会进入个人训练集；未知或未审核事件不会进入。</p>
         </div>
         <div class="segmented" id="review-filters">
-          <button class="active" data-filter="high">高稀有度</button>
+          <button class="active" data-filter="high">待确认 SSR+</button>
           <button data-filter="pending">全部待审核</button>
           <button data-filter="unknown">未知 / 待重标</button>
           <button data-filter="reviewed">已审核</button>
         </div>
+      </div>
+      <div class="review-class-filter">
+        <label for="review-class-filter">式神</label>
+        <select id="review-class-filter" class="plain-select">
+          <option value="">全部式神</option>
+        </select>
       </div>
       <div class="scan-shortcuts">
         <span><kbd>1</kbd> 旧模型正确</span>
@@ -303,7 +309,7 @@
         <div>
           <p class="eyebrow">IMMUTABLE DATASET</p>
           <h2>生成数据集版本</h2>
-          <p class="hint">按整局拆分，同一局的全部帧不会跨 train / val / test。达到 20 个独立事件的类别默认可参加首次试训。</p>
+          <p class="hint">这里只使用人工确认或改正类别的事件及已导入人工框。按整局拆分；可一键选择全部已确认且有框的 SSR+ 类别。</p>
         </div>
         <button id="refresh-dataset" class="button">刷新统计</button>
       </div>
@@ -317,14 +323,17 @@
         <article class="panel">
           <div class="panel-title">
             <h3>类别样本门槛</h3>
-            <button id="select-eligible" class="text-button">选择建议实验类别</button>
+            <div class="inline-actions">
+              <button id="select-confirmed-high-rarity" class="text-button">选择已确认 SSR+</button>
+              <button id="select-eligible" class="text-button">选择建议实验类别</button>
+            </div>
           </div>
           <p class="muted small">建议 5 次可做实验训练，20 次可正式试训，50 次可进入 assist，100 次可考虑 primary。计数单位是独立目标出现，不是连续帧。</p>
           <div id="dataset-warnings" class="notice-list"></div>
           <div class="table-scroll">
             <table class="class-table">
-              <thead><tr><th>选择</th><th>式神</th><th>稀有度</th><th>事件</th><th>可用框</th><th>阶段</th></tr></thead>
-              <tbody id="dataset-classes"><tr><td colspan="6" class="muted">正在读取…</td></tr></tbody>
+              <thead><tr><th>选择</th><th>式神</th><th>稀有度</th><th>事件</th><th>可用框</th><th>阶段</th><th>样本</th></tr></thead>
+              <tbody id="dataset-classes"><tr><td colspan="7" class="muted">正在读取…</td></tr></tbody>
             </table>
           </div>
           <div class="build-footer">
@@ -360,9 +369,16 @@
             <label>模型<select id="train-model"><option value="yolo11s.pt">yolo11s（基准）</option><option value="yolo11n.pt">yolo11n（低延迟）</option></select></label>
             <label>输入尺寸<input id="train-imgsz" type="number" value="960" min="320" max="1280" step="32"></label>
             <label>epochs<input id="train-epochs" type="number" value="100" min="1" max="500"></label>
-            <label>batch<input id="train-batch" type="number" value="4" min="1" max="32"></label>
+            <label>batch<input id="train-batch" type="number" value="8" min="1" max="32" title="RTX 3070 + YOLO11s + 960 建议先试 8"></label>
             <label>patience<input id="train-patience" type="number" value="20" min="1" max="200"></label>
             <label>DataLoader workers<input id="train-workers" type="number" value="0" min="0" max="8" title="Windows 建议 0，避免共享内存错误"></label>
+            <label>图像缓存
+              <select id="train-cache">
+                <option value="ram" selected>RAM 缓存（当前数据推荐）</option>
+                <option value="none">不缓存</option>
+                <option value="disk">磁盘缓存</option>
+              </select>
+            </label>
           </div>
           <button id="start-training" class="button primary">开始训练</button>
           <p class="hint">训练环境：.venv-train · GPU 0 · FP16 · 单任务队列</p>

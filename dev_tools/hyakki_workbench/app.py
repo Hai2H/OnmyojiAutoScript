@@ -42,14 +42,15 @@ class TrainingStartRequest(BaseModel):
     model: str = 'yolo11s.pt'
     epochs: int = 100
     imgsz: int = 960
-    batch: int = 4
+    batch: int = 8
     patience: int = 20
     workers: int = 0
+    cache: str = 'ram'
 
 
 class TrainingTestRequest(BaseModel):
     imgsz: int = 960
-    batch: int = 4
+    batch: int = 8
 
 
 class PublishRequest(BaseModel):
@@ -127,6 +128,7 @@ def create_app(paths: WorkspacePaths | None = None) -> FastAPI:
         status_value: str | None = Query(default=None, alias='status'),
         source: str | None = None,
         rarity: str | None = None,
+        class_id: int | None = None,
         pending_high_only: bool = False,
         limit: int = Query(default=100, ge=1, le=500),
         offset: int = Query(default=0, ge=0),
@@ -136,6 +138,7 @@ def create_app(paths: WorkspacePaths | None = None) -> FastAPI:
                 status=status_value,
                 source=source,
                 rarity=rarity,
+                class_id=class_id,
                 pending_high_only=pending_high_only,
                 limit=limit,
                 offset=offset,
@@ -349,6 +352,7 @@ def create_app(paths: WorkspacePaths | None = None) -> FastAPI:
                 batch=request.batch,
                 patience=request.patience,
                 workers=request.workers,
+                cache=request.cache,
             )
         except ValueError as exception:
             raise HTTPException(status_code=422, detail=str(exception)) from exception

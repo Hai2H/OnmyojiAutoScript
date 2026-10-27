@@ -43,19 +43,6 @@ def _gate(count: int) -> str:
     return 'insufficient'
 
 
-def _box_iou(left: dict, right: dict) -> float:
-    x1 = max(float(left['x1']), float(right['x1']))
-    y1 = max(float(left['y1']), float(right['y1']))
-    x2 = min(float(left['x2']), float(right['x2']))
-    y2 = min(float(left['y2']), float(right['y2']))
-    if x2 <= x1 or y2 <= y1:
-        return 0.0
-    intersection = (x2 - x1) * (y2 - y1)
-    left_area = (float(left['x2']) - float(left['x1'])) * (float(left['y2']) - float(left['y1']))
-    right_area = (float(right['x2']) - float(right['x1'])) * (float(right['y2']) - float(right['y1']))
-    return intersection / max(1e-9, left_area + right_area - intersection)
-
-
 class DatasetBuilder:
     def __init__(self, catalog: Catalog):
         self.catalog = catalog
@@ -92,17 +79,20 @@ class DatasetBuilder:
                 'SELECT id, image_path FROM raw_frames'
             ).fetchall()
         }
-        manual_boxes_by_image: dict[str, list[dict]] = defaultdict(list)
+        raw_rows = {
+            row['id']: row
+            for row in self.catalog.connection.execute('SELECT * FROM raw_frames').fetchall()
+        }
+        manual_images = set()
         for shape in manual_shapes:
             image_path = raw_paths.get(shape['frame_id'])
             if image_path:
-                manual_boxes_by_image[image_path].append(shape['box'])
+                manual_images.add(image_path)
         covered_events = set()
         for event in events:
             for sample in self._samples_for_event(event):
                 image_path = str(Path(sample['image_path']).resolve())
-                if any(_box_iou(sample['box'], manual) >= .35
-                       for manual in manual_boxes_by_image.get(image_path, [])):
+                if image_path in manual_images:
                     covered_events.add(event['id'])
                     break
 
@@ -110,12 +100,44 @@ class DatasetBuilder:
         for class_id in set(by_class) | set(manual_frames_by_class):
             members = by_class.get(class_id, [])
             registry = self.catalog.class_table.get(class_id, {})
-            ready = sum(
-                1 for event in members
-                if event['id'] not in covered_events and self._samples_for_event(event)
-            )
+            ready = 0
+            samples = []
+            for event in members:
+                if event['id'] in covered_events:
+                    continue
+                event_samples = self._samples_for_event(event)
+                if not event_samples:
+                    continue
+                ready += 1
+                for sample in event_samples:
+                    if not Path(sample['image_path']).is_file():
+                        continue
+                    samples.append({
+                        'key': f"{event['id']}:{sample['image_index']}",
+                        'event_id': event['id'],
+                        'image_url': f"/api/events/{event['id']}/image/{sample['image_index']}",
+                        'name': event.get('reviewed_name') or event.get('reviewed_label') or event.get('old_name') or event.get('old_label') or '身份未知',
+                        'round_id': event['round_id'],
+                        'status': event['status'],
+                        'source': '人工标注框' if sample['label_source'] == 'xanylabeling' else '审核代表框',
+                    })
             manual_frames = len(manual_frames_by_class.get(class_id, set()))
             ready += manual_frames
+            for shape in manual_shapes:
+                if int(shape['class_id']) != class_id:
+                    continue
+                frame = raw_rows.get(shape['frame_id'])
+                if not frame or not Path(frame['image_path']).is_file():
+                    continue
+                samples.append({
+                    'key': f"manual:{shape['frame_id']}:{shape['id']}",
+                    'event_id': None,
+                    'image_url': f"/api/raw-frames/{shape['frame_id']}/image",
+                    'name': registry.get('name') or registry.get('label'),
+                    'round_id': frame['round_id'],
+                    'status': '人工标注',
+                    'source': '盲扫人工框',
+                })
             rows.append({
                 'class_id': class_id,
                 'label': registry.get('label'),
@@ -126,6 +148,7 @@ class DatasetBuilder:
                 'manual_frames': manual_frames,
                 'box_ready_events': ready,
                 'missing_box_events': missing_box[class_id],
+                'samples': samples,
                 'gate': _gate(ready),
                 'train_gate': TRAIN_GATE,
             })
@@ -320,12 +343,8 @@ class DatasetBuilder:
                 '如确认进行低样本实验训练，请启用 allow_below_suggestion'
             )
 
-        events = [
-            event for event in self._reviewed_events()
-            if event.get('reviewed_class_id') in selected
-        ]
-
-        samples = []
+        events = self._reviewed_events()
+        all_samples = []
         excluded = []
         digest_builder = hashlib.sha256()
         for event in events:
@@ -345,7 +364,7 @@ class DatasetBuilder:
                         'image_path': str(source),
                     })
                     continue
-                samples.append({
+                all_samples.append({
                     **sample,
                     'event_id': event['id'],
                     'source_kind': event['source_kind'],
@@ -361,16 +380,17 @@ class DatasetBuilder:
                 'SELECT * FROM raw_frames'
             ).fetchall()
         }
+        manual_images = set()
         for shape in self.catalog.manual_shapes():
             class_id = int(shape['class_id'])
-            if class_id not in selected:
-                continue
             frame = raw_frames.get(shape['frame_id'])
             if not frame:
                 continue
-            samples.append({
+            image_path = str(Path(frame['image_path']).resolve())
+            manual_images.add(image_path)
+            all_samples.append({
                 'image_index': 0,
-                'image_path': frame['image_path'],
+                'image_path': image_path,
                 'box': shape['box'],
                 'class_id': class_id,
                 'label_source': 'raw_frame_xanylabeling',
@@ -382,23 +402,28 @@ class DatasetBuilder:
                 'label': self.catalog.class_table[class_id]['label'],
             })
 
-        manual_boxes_by_image = defaultdict(list)
-        for sample in samples:
-            if sample['label_source'] == 'raw_frame_xanylabeling':
-                manual_boxes_by_image[str(Path(sample['image_path']).resolve())].append(sample['box'])
-        filtered_samples = []
-        for sample in samples:
-            if sample['label_source'] != 'raw_frame_xanylabeling':
-                image_path = str(Path(sample['image_path']).resolve())
-                if any(_box_iou(sample['box'], manual) >= .35
-                       for manual in manual_boxes_by_image.get(image_path, [])):
-                    excluded.append({
-                        'event_id': sample['event_id'],
-                        'reason': 'superseded_by_manual_annotation',
-                    })
-                    continue
-            filtered_samples.append(sample)
-        samples = filtered_samples
+        # A saved raw-frame annotation is the complete label set for that image.
+        eligible_samples = []
+        for sample in all_samples:
+            image_path = str(Path(sample['image_path']).resolve())
+            if (sample['label_source'] != 'raw_frame_xanylabeling'
+                    and image_path in manual_images):
+                excluded.append({
+                    'event_id': sample['event_id'],
+                    'reason': 'superseded_by_manual_annotation',
+                })
+                continue
+            sample['image_path'] = image_path
+            eligible_samples.append(sample)
+
+        selected_images = {
+            sample['image_path'] for sample in eligible_samples
+            if int(sample['class_id']) in selected
+        }
+        samples = [
+            sample for sample in eligible_samples
+            if sample['image_path'] in selected_images
+        ]
 
         if not samples:
             raise ValueError('所选类别没有包含可用图片和矩形框')
@@ -427,7 +452,8 @@ class DatasetBuilder:
                 )
             )
 
-        local_index = {class_id: index for index, class_id in enumerate(sorted(selected))}
+        dataset_classes = sorted({int(sample['class_id']) for sample in samples})
+        local_index = {class_id: index for index, class_id in enumerate(dataset_classes)}
         dataset_root = self.catalog.paths.datasets_root
         dataset_root.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
@@ -439,6 +465,7 @@ class DatasetBuilder:
         per_class = Counter()
         per_domain = Counter()
         try:
+            image_groups = defaultdict(list)
             for sample in samples:
                 source = Path(sample['image_path'])
                 try:
@@ -458,41 +485,46 @@ class DatasetBuilder:
                         'reason': 'invalid_box',
                     })
                     continue
+                image_groups[sample['image_path']].append((sample, box, width, height))
+
+            for image_path, image_samples in sorted(image_groups.items()):
+                sample = image_samples[0][0]
+                source = Path(image_path)
                 split = split_of_group[_group_key(sample)]
-                class_index = local_index[int(sample['class_id'])]
-                safe_event = sample['event_id'].replace(':', '_').replace('/', '_')
-                filename = f'{safe_event}_{sample["image_index"] + 1:02d}{source.suffix.lower()}'
+                image_key = hashlib.sha256(image_path.encode('utf-8')).hexdigest()[:16]
+                filename = f'{image_key}{source.suffix.lower() or ".jpg"}'
                 image_target = temporary / 'images' / split / filename
                 self._copy_or_link(source, image_target)
                 label_target = temporary / 'labels' / split / image_target.with_suffix('.txt').name
                 label_target.parent.mkdir(parents=True, exist_ok=True)
-                label_target.write_text(
-                    self._yolo_line(class_index, box, width, height) + '\n',
-                    encoding='utf-8',
-                )
                 image_hash = hashlib.sha256(source.read_bytes()).hexdigest()
-                digest_builder.update(
-                    f'{sample["event_id"]}|{sample["image_index"]}|{sample["class_id"]}|'
-                    f'{json.dumps(box, sort_keys=True)}|{image_hash}\n'.encode()
-                )
-                rows.append({
-                    'event_id': sample['event_id'],
-                    'image_index': sample['image_index'],
-                    'source_path': str(source),
-                    'dataset_image': str(image_target.relative_to(temporary)),
-                    'dataset_label': str(label_target.relative_to(temporary)),
-                    'class_id': int(sample['class_id']),
-                    'class_index': class_index,
-                    'label': sample['label'],
-                    'rarity': sample['rarity'],
-                    'source_kind': sample['source_kind'],
-                    'round_id': sample['round_id'],
-                    'split': split,
-                    'box': box,
-                    'label_source': sample['label_source'],
-                })
+                label_lines = []
+                for sample, box, width, height in image_samples:
+                    class_index = local_index[int(sample['class_id'])]
+                    label_lines.append(self._yolo_line(class_index, box, width, height))
+                    digest_builder.update(
+                        f'{sample["event_id"]}|{sample["image_index"]}|{sample["class_id"]}|'
+                        f'{json.dumps(box, sort_keys=True)}|{image_hash}\n'.encode()
+                    )
+                    rows.append({
+                        'event_id': sample['event_id'],
+                        'image_index': sample['image_index'],
+                        'source_path': str(source),
+                        'dataset_image': str(image_target.relative_to(temporary)),
+                        'dataset_label': str(label_target.relative_to(temporary)),
+                        'class_id': int(sample['class_id']),
+                        'class_index': class_index,
+                        'label': sample['label'],
+                        'rarity': sample['rarity'],
+                        'source_kind': sample['source_kind'],
+                        'round_id': sample['round_id'],
+                        'split': split,
+                        'box': box,
+                        'label_source': sample['label_source'],
+                    })
+                    per_class[sample['label']] += 1
+                label_target.write_text('\n'.join(label_lines) + '\n', encoding='utf-8')
                 per_split[split] += 1
-                per_class[sample['label']] += 1
                 per_domain[sample['source_kind']] += 1
 
             for negative in empty_negatives:
@@ -511,7 +543,7 @@ class DatasetBuilder:
             if not rows:
                 raise ValueError('所有候选样本都在图片或框校验时被排除')
 
-            classes = [self.catalog.class_table[class_id] for class_id in sorted(selected)]
+            classes = [self.catalog.class_table[class_id] for class_id in dataset_classes]
             (temporary / 'classes.txt').write_text(
                 '\n'.join(f"{row['label']} {row['name']}" for row in classes) + '\n',
                 encoding='utf-8',
@@ -544,15 +576,17 @@ class DatasetBuilder:
                         'class_id': class_id,
                         **self.catalog.class_table[class_id],
                     }
-                    for index, class_id in enumerate(sorted(selected))
+                    for index, class_id in enumerate(dataset_classes)
                 ],
                 'split_groups': split_of_group,
                 'samples': rows,
                 'stats': {
-                    'images': len(rows) + len(empty_negatives),
-                    'positive_images': len(rows),
+                    'images': len(image_groups) + len(empty_negatives),
+                    'positive_images': len(image_groups),
                     'manual_positive_images': sum(
-                        1 for row in rows if row['label_source'] == 'raw_frame_xanylabeling'
+                        1 for image_samples in image_groups.values()
+                        if any(sample['label_source'] == 'raw_frame_xanylabeling'
+                               for sample, _, _, _ in image_samples)
                     ),
                     'empty_negative_images': len(empty_negatives),
                     'boxes': len(rows),

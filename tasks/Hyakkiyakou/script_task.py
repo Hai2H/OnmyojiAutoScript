@@ -349,6 +349,8 @@ class ScriptTask(GameUi, HyaSlave, SwitchOnmyoji):
         self.device.stuck_record_add('BATTLE_STATUS_S')
         # 正式开始
         logger.hr('Start Hyakkiyakou')
+        # Apply the configured capture interval independently of debug overlays.
+        self.set_fast_screenshot_interval(self._config.debug_config.hya_interval)
         if self.bean_capture is not None:
             logger.info(f'Bean capture folder: {self.bean_capture.begin_round().resolve()}')
         init_bean_flag: bool = False
@@ -358,6 +360,7 @@ class ScriptTask(GameUi, HyaSlave, SwitchOnmyoji):
             self.debugger.show_start()
         while 1:
             self.fast_screenshot(screenshot=self._config.debug_config.hya_screenshot_method)
+            frame_started = time.perf_counter()
             if self.appear(self.I_HEND):
                 break
             if not self.appear(self.I_CHECK_RUN):
@@ -368,20 +371,15 @@ class ScriptTask(GameUi, HyaSlave, SwitchOnmyoji):
                 time.sleep(0.5)
             #修改：在这里不再区分freeze，而是将状态传到decision用于执行冻结策略
             #目前被禁用了 因为冰冻状态下检测正确率约等于0 全是蝉冰雪女 =.=
-            if not self.appear(self.I_HFREEZE):
-                # -------------------------------------------------------
-                freeze = self.appear(self.I_HFREEZE)
-                self.slave_state = self.update_state()
-                tracks = self.detector(image=self.device.image, response=last_action)
-                last_action = self.agent.decision(tracks=tracks, state=self.slave_state, freeze=freeze)
-                self.do_action(last_action, state=self.slave_state)
-                if self.bean_capture is not None:
-                    self.bean_capture.tick(self.device.image, tracks, phase='running')
-            else:
-                # TODO freeze state
-                tracks = []
-                if self.bean_capture is not None:
-                    self.bean_capture.tick(self.device.image, [], phase='frozen_skipped')
+            freeze = self.appear(self.I_HFREEZE)
+            self.slave_state = self.update_state()
+            tracks = self.detector(image=self.device.image, response=last_action)
+            self.agent.lead_ms = (time.perf_counter() - frame_started) * 1000.0
+            last_action = self.agent.decision(tracks=tracks, state=self.slave_state, freeze=freeze)
+            self.do_action(last_action, state=self.slave_state)
+            if self.bean_capture is not None:
+                self.bean_capture.tick(self.device.image, tracks, phase='frozen' if freeze else 'running',
+                                       state=self.slave_state, action=last_action)
 
             # debug
             if self._config.debug_config.hya_show:

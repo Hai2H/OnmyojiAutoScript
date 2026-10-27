@@ -133,7 +133,7 @@ function renderEvents(payload) {
   container.className = 'event-list';
   container.innerHTML = state.events.slice(0, 8).map((event) => {
     const rarity = event.rarity || 'other';
-    const name = event.old_name || event.old_label || '身份未知';
+    const name = event.reviewed_name || event.reviewed_label || event.old_name || event.old_label || '身份未知';
     const source = event.source_kind === 'boss' ? '鬼王候选' : '撒豆轨迹';
     const confidence = Number.isFinite(event.confidence)
       ? ` · ${Math.round(event.confidence * 100)}%`
@@ -456,10 +456,14 @@ async function loadScanPage() {
 }
 
 function reviewQuery(filter) {
-  if (filter === 'high') return '/api/events?rarity=UR,SP,SSR&limit=200';
-  if (filter === 'pending') return '/api/events?status=pending,needs_label&limit=200';
-  if (filter === 'unknown') return '/api/events?status=unknown,needs_label&limit=200';
-  return '/api/events?status=correct,changed,unknown&limit=200';
+  let query = '';
+  if (filter === 'high') query = 'pending_high_only=true';
+  else if (filter === 'pending') query = 'status=pending,needs_label';
+  else if (filter === 'unknown') query = 'status=unknown,needs_label';
+  else query = 'status=correct,changed,unknown';
+  const classId = $('#review-class-filter')?.value;
+  if (classId) query += `&class_id=${encodeURIComponent(classId)}`;
+  return `/api/events?${query}&limit=200`;
 }
 
 function clearReviewSelection(message = '当前筛选下没有事件。') {
@@ -479,6 +483,7 @@ async function loadReviewQueue(selectFirst = false) {
   list.className = 'review-list empty';
   list.textContent = '正在读取…';
   try {
+    await ensureClasses();
     const payload = await api(reviewQuery(state.reviewFilter));
     state.reviewItems = payload.items || [];
     $('#review-total').textContent = payload.total ?? 0;
@@ -489,14 +494,17 @@ async function loadReviewQueue(selectFirst = false) {
     }
     list.className = 'review-list';
     list.innerHTML = payload.items.map((event) => {
-      const name = event.old_name || event.old_label || '身份未知';
+      const name = event.reviewed_name || event.reviewed_label || event.old_name || event.old_label || '身份未知';
       const active = state.reviewEvent?.id === event.id ? ' active' : '';
+      const highRarityHint = (event.suspicion || []).includes('high_rarity')
+        ? ' · SSR+候选' : '';
+      const oldName = event.reviewed_name ? ` · 旧模型：${event.old_name || event.old_label || '未知'}` : '';
       return `
         <button class="review-item${active}" data-review-id="${escapeHtml(event.id)}">
           <img src="${escapeHtml(event.image_url)}" alt="" loading="lazy">
           <div>
             <strong>${escapeHtml(name)}</strong>
-            <span>${escapeHtml(event.rarity || '?')} · ${escapeHtml(event.status)} · ${escapeHtml(event.round_id)}</span>
+            <span>${escapeHtml(event.rarity || '?')}${highRarityHint} · ${escapeHtml(event.status)}${oldName} · ${escapeHtml(event.round_id)}</span>
           </div>
         </button>`;
     }).join('');
@@ -555,6 +563,7 @@ async function ensureClasses() {
   const payload = await api('/api/classes?limit=500');
   state.classes = payload.items || [];
   renderClassOptions();
+  renderReviewClassFilter();
 }
 
 function renderClassOptions() {
@@ -570,6 +579,16 @@ function renderClassOptions() {
   state.reviewSelectedClassId = null;
 }
 
+function renderReviewClassFilter() {
+  const select = $('#review-class-filter');
+  if (!select) return;
+  const selected = select.value;
+  select.innerHTML = '<option value="">全部式神</option>' + (state.classes || []).map((item) => `
+    <option value="${item.class_id}">${escapeHtml(item.rarity)} · ${escapeHtml(item.name)} · ${escapeHtml(item.label)}</option>
+  `).join('');
+  select.value = selected;
+}
+
 async function selectReviewEvent(eventId) {
   try {
     await ensureClasses();
@@ -583,7 +602,7 @@ async function selectReviewEvent(eventId) {
     $$('.review-item').forEach((item) => item.classList.toggle('active', item.dataset.reviewId === eventId));
     $('#review-empty').hidden = true;
     $('#review-content').hidden = false;
-    $('#old-identity').textContent = event.old_name || event.old_label || '身份未知';
+    $('#old-identity').textContent = event.reviewed_name || event.reviewed_label || event.old_name || event.old_label || '身份未知';
     $('#old-rarity').textContent = event.rarity || 'UNKNOWN';
     $('#old-confidence').textContent = Number.isFinite(event.confidence)
       ? `${Math.round(event.confidence * 100)}%`
@@ -709,7 +728,7 @@ function renderDatasetReadiness(readiness) {
     .map((warning) => `<div class="notice">${escapeHtml(warning)}</div>`).join('');
   const body = $('#dataset-classes');
   if (!readiness.classes?.length) {
-    body.innerHTML = '<tr><td colspan="6" class="muted">还没有已审核并且带可用矩形框的类别。</td></tr>';
+    body.innerHTML = '<tr><td colspan="7" class="muted">还没有已审核并且带可用矩形框的类别。</td></tr>';
   } else {
     body.innerHTML = readiness.classes.map((row) => {
       const checked = readiness.default_classes.includes(row.class_id) ? ' checked' : '';
@@ -723,11 +742,42 @@ function renderDatasetReadiness(readiness) {
           <td>${row.events}</td>
           <td>${row.box_ready_events}</td>
           <td><span class="gate ${className}">${className}</span></td>
+          <td><button class="text-button" data-dataset-samples="${row.class_id}">查看 ${row.samples?.length || 0} 张</button></td>
+        </tr>
+        <tr class="dataset-samples-row" data-dataset-sample-row="${row.class_id}" hidden>
+          <td colspan="7"><div class="dataset-samples">${(row.samples || []).length ? row.samples.map((sample) => `
+            <article class="dataset-sample">
+              <img src="${escapeHtml(sample.image_url)}" alt="${escapeHtml(sample.name)}" loading="lazy">
+              <div><strong>${escapeHtml(sample.name)}</strong><span>${escapeHtml(sample.round_id)} · ${escapeHtml(sample.source)}</span></div>
+              ${sample.event_id ? `<button class="text-button" data-open-dataset-event="${escapeHtml(sample.event_id)}">打开审核</button>` : '<span class="muted small">人工框</span>'}
+            </article>`).join('') : '<span class="muted">没有可用样本</span>'}</div></td>
         </tr>`;
     }).join('');
   }
   updateDatasetSelection();
 }
+
+$('#dataset-classes').addEventListener('click', async (event) => {
+  const toggle = event.target.closest('[data-dataset-samples]');
+  if (toggle) {
+    const row = $(`[data-dataset-sample-row="${toggle.dataset.datasetSamples}"]`);
+    row.hidden = !row.hidden;
+    const classData = state.datasetReadiness?.classes.find((item) => String(item.class_id) === toggle.dataset.datasetSamples);
+    toggle.textContent = `${row.hidden ? '查看' : '收起'} ${classData?.samples?.length || 0} 张`;
+    return;
+  }
+  const open = event.target.closest('[data-open-dataset-event]');
+  if (open) {
+    const eventId = open.dataset.openDatasetEvent;
+    state.reviewFilter = 'reviewed';
+    $$('#review-filters button').forEach((button) => {
+      button.classList.toggle('active', button.dataset.filter === 'reviewed');
+    });
+    switchPage('review');
+    await loadReviewQueue(false);
+    await selectReviewEvent(eventId);
+  }
+});
 
 function renderDatasetHistory(items) {
   state.datasets = items || [];
@@ -1013,6 +1063,9 @@ $('#review-filters').addEventListener('click', (event) => {
   $$('#review-filters button').forEach((item) => item.classList.toggle('active', item === button));
   loadReviewQueue(true);
 });
+$('#review-class-filter').addEventListener('change', () => {
+  loadReviewQueue(true);
+});
 $('#review-list').addEventListener('click', (event) => {
   const item = event.target.closest('[data-review-id]');
   if (item) selectReviewEvent(item.dataset.reviewId);
@@ -1093,6 +1146,15 @@ $('#select-eligible').addEventListener('click', () => {
   });
   updateDatasetSelection();
 });
+$('#select-confirmed-high-rarity').addEventListener('click', () => {
+  const confirmedHighRarity = new Set((state.datasetReadiness?.classes || [])
+    .filter((row) => ['SSR', 'SP', 'UR'].includes(row.rarity) && row.box_ready_events > 0)
+    .map((row) => row.class_id));
+  $$('#dataset-classes input[type="checkbox"]').forEach((input) => {
+    input.checked = confirmedHighRarity.has(Number(input.value));
+  });
+  updateDatasetSelection();
+});
 $('#build-dataset').addEventListener('click', async () => {
   const classIds = selectedDatasetClasses();
   if (!classIds.length) {
@@ -1137,6 +1199,7 @@ $('#start-training').addEventListener('click', async () => {
         batch: Number($('#train-batch').value),
         patience: Number($('#train-patience').value),
         workers: Number($('#train-workers').value),
+        cache: $('#train-cache').value,
       }),
     });
     state.currentJob = job;

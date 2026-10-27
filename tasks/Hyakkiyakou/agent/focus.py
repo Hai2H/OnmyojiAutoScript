@@ -88,14 +88,18 @@ velocity: {self._v}"""
         buff_states = state[4:] if len(state) > 4 else []  # get buff status：state[4:] = buff_0 ~ buff_3，对应 HyaBuff
         has_prob_up = any(b == HyaBuff.BUFF_STATE6 for b in buff_states) # 是否存在“概率UP”buff（HyaBuff.BUFF_STATE6）
         buff_omega, buff_cx, buff_cy, buff_v, buff_class = self.omega_buff(tracks, strategy['invite_friend'], has_prob_up)
-        if self._omega > buff_omega:
+        rapid_rare = (SHIKIGAMI_TABLE.get(int(self._class), {}).get('rarity') in {'SSR', 'SP'}
+                      and has_prob_up and not freeze)
+        if rapid_rare or self._omega > buff_omega:
             buffed = False
-            target_x = self._cx + self._v * 100 - (self._w // 2)
+            lead_ms = float(strategy.get('lead_ms', 100.0))
+            target_x = self._cx + self._v * lead_ms - (self._w // 2)
             target_y = self._cy - 40
             target_class = self._class # new : for class
         else:
             buffed = True
-            target_x = buff_cx + buff_v * 100
+            lead_ms = float(strategy.get('lead_ms', 100.0))
+            target_x = buff_cx + buff_v * lead_ms
             target_y = buff_cy - 40  # top left corner
             target_class = buff_class # new : for class
 
@@ -103,8 +107,9 @@ velocity: {self._v}"""
         is_rare_ssr_sp = False
         if is_high_rarity(target_class) and self._omega > buff_omega:
             is_rare_ssr_sp = True
-        _r = self.r(vector=state, omega=self._omega, omega_buff=self._omega_buff, is_rare_ssr_sp=is_rare_ssr_sp, freeze=freeze, is_buff=buffed)
-        throw = True if _r > 0 else False
+        _r = self.r(vector=state, omega=self._omega, omega_buff=buff_omega,
+                    is_rare_ssr_sp=is_rare_ssr_sp, freeze=freeze, is_buff=buffed)
+        throw = rapid_rare or _r > 0
         # x, y, throw, number
         return [target_x, target_y, throw, 10]
 
@@ -114,8 +119,6 @@ velocity: {self._v}"""
         max_cy = 0
         max_v = 0
         max_class = 0
-
-        focus_is_ssr_sp = is_high_rarity(self._class)
 
         for _id, _class, _conf, _cx, _cy, _w, _h, _v in tracks:
             _current_omega = 0.

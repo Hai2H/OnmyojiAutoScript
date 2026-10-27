@@ -263,7 +263,7 @@ class Catalog:
                 })
             self._upsert_event(event, now)
             upserted += 1
-            if event['rarity'] in HIGH_RARITIES:
+            if 'high_rarity' in event['suspicion']:
                 high_rarity += 1
             if event['suspicion']:
                 suspicious += 1
@@ -340,12 +340,16 @@ class Catalog:
 
         flips = sum(left != right for left, right in zip(classes, classes[1:]))
         lowest_confidence = min(float(item['track'][2]) for item in history)
+        high_rarity_class_ids = sorted({
+            observed_class_id for observed_class_id in classes
+            if self._row_for(observed_class_id).get('rarity') in HIGH_RARITIES
+        })
         suspicion = []
         if flips:
             suspicion.append('class_flip')
         if lowest_confidence < LOW_CONFIDENCE:
             suspicion.append('low_confidence')
-        if row.get('rarity') in HIGH_RARITIES:
+        if high_rarity_class_ids:
             suspicion.append('high_rarity')
         if int(class_id) > 218:
             suspicion.append('unsupported_by_old_model')
@@ -358,9 +362,29 @@ class Catalog:
                 -_box_area(item['track']),
             ),
         )
+        high_rarity_representatives = sorted(
+            (item for item in history
+             if self._row_for(int(item['track'][1])).get('rarity') in HIGH_RARITIES),
+            key=lambda item: (
+                -float(item['track'][2]),
+                -_box_area(item['track']),
+                item['frame'],
+            ),
+        )
+        representative_candidates = []
+        high_classes_added = set()
+        for item in high_rarity_representatives:
+            observed_class_id = int(item['track'][1])
+            if observed_class_id in high_classes_added:
+                continue
+            representative_candidates.append(item)
+            high_classes_added.add(observed_class_id)
+            if len(representative_candidates) >= REPRESENTATIVE_LIMIT:
+                break
+        representative_candidates.extend(ranked)
         representatives = []
         seen_frames = set()
-        for item in ranked:
+        for item in representative_candidates:
             frame = item['frame']
             if frame in seen_frames:
                 continue
@@ -381,6 +405,7 @@ class Catalog:
             'class_counts': dict(class_counts),
             'min_confidence': round(lowest_confidence, 4),
             'class_flips': flips,
+            'high_rarity_class_ids': high_rarity_class_ids,
         }
         return {
             'id': f'bean:{round_id}:{track_id}',
@@ -651,7 +676,8 @@ class Catalog:
         }
         pending_high = self.connection.execute(
             "SELECT COUNT(*) FROM events "
-            "WHERE status IN ('pending', 'needs_label') AND rarity IN ('SSR', 'SP', 'UR')"
+            "WHERE status IN ('pending', 'needs_label') AND ("
+            "rarity IN ('SSR', 'SP', 'UR') OR suspicion LIKE '%\"high_rarity\"%')"
         ).fetchone()[0]
         scanned = self.connection.execute(
             'SELECT scanned_at FROM scan_runs ORDER BY id DESC LIMIT 1'
@@ -740,8 +766,7 @@ class Catalog:
             },
         }
 
-    @staticmethod
-    def _event_payload(row: sqlite3.Row) -> dict:
+    def _event_payload(self, row: sqlite3.Row) -> dict:
         payload = dict(row)
         decoders = {
             'box_json': ('box', None),
@@ -758,6 +783,9 @@ class Catalog:
             payload['suspicion'] = json.loads(payload.get('suspicion') or '[]')
         except json.JSONDecodeError:
             payload['suspicion'] = []
+        self._ensure_class_table()
+        reviewed_row = self._row_for(payload.get('reviewed_class_id'))
+        payload['reviewed_name'] = reviewed_row.get('name') or payload.get('reviewed_label')
         payload['needs_review'] = bool(payload.get('needs_review'))
         payload['image_url'] = f"/api/events/{payload['id']}/image/0"
         return payload
@@ -768,6 +796,7 @@ class Catalog:
         status: str | None = None,
         source: str | None = None,
         rarity: str | None = None,
+        class_id: int | None = None,
         pending_high_only: bool = False,
         limit: int = 100,
         offset: int = 0,
@@ -795,8 +824,14 @@ class Catalog:
                 placeholders = ', '.join('?' for _ in rarities)
                 clauses.append(f'rarity IN ({placeholders})')
                 values.extend(rarities)
+        if class_id is not None:
+            clauses.append('(old_class_id = ? OR reviewed_class_id = ?)')
+            values.extend([class_id, class_id])
         if pending_high_only:
-            clauses.append("status = 'pending' AND rarity IN ('SSR', 'SP', 'UR')")
+            clauses.append(
+                "status IN ('pending', 'needs_label') AND ("
+                "rarity IN ('SSR', 'SP', 'UR') OR suspicion LIKE '%\"high_rarity\"%')"
+            )
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ''
         total = self.connection.execute(
             f'SELECT COUNT(*) FROM events {where}', values
@@ -958,7 +993,6 @@ class Catalog:
                 'group_id': None,
                 'shape_type': 'rectangle',
                 'flags': {'source': 'old_model'},
-                'description': '旧模型预标注，可能是错误类别；漏检目标需手动补框',
             })
         return {
             'version': '4.1.1',
@@ -1158,25 +1192,52 @@ class Catalog:
         }
 
     def import_raw_batch(self) -> dict:
-        manifest = _read_json(self.raw_batch_folder / 'manifest.json', {})
+        manifest_path = self.raw_batch_folder / 'manifest.json'
+        manifest = _read_json(manifest_path, {})
         if not isinstance(manifest, dict):
             raise ValueError('尚未生成批量标注目录')
         imported_frames = 0
         imported_shapes = 0
         skipped = []
+        remaining_items = []
+        archived_items = []
         for item in manifest.get('items') or []:
             frame_id = item.get('frame_id')
             annotation_path = self.raw_batch_folder / item.get('annotation', '')
             payload = _read_json(annotation_path, None)
             if not isinstance(payload, dict):
                 skipped.append({'frame_id': frame_id, 'reason': 'missing_annotation'})
+                remaining_items.append(item)
                 continue
             shape_count = self._save_raw_annotations(frame_id, payload)
             if shape_count:
                 imported_frames += 1
                 imported_shapes += shape_count
+                archived_items.append(item)
             else:
                 skipped.append({'frame_id': frame_id, 'reason': 'no_valid_shapes'})
+                remaining_items.append(item)
+
+        if archived_items:
+            archive_root = self.raw_batch_folder.parent / 'archive'
+            archive_root.mkdir(parents=True, exist_ok=True)
+            archive_folder = archive_root / datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+            archive_folder.mkdir()
+            for item in archived_items:
+                for key in ('image', 'annotation'):
+                    name = item.get(key)
+                    if not isinstance(name, str) or Path(name).name != name:
+                        continue
+                    source = self.raw_batch_folder / name
+                    if source.is_file():
+                        shutil.move(str(source), str(archive_folder / name))
+
+        manifest['items'] = remaining_items
+        manifest['generated_at'] = _now()
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=1),
+            encoding='utf-8',
+        )
         return {
             'imported_frames': imported_frames,
             'imported_shapes': imported_shapes,
@@ -1397,7 +1458,6 @@ class Catalog:
                         'group_id': None,
                         'shape_type': 'rectangle',
                         'flags': {'source': 'old_model'},
-                        'description': '旧模型预标注，必须人工确认',
                     })
                 payload = {
                     'version': '4.1.1',
