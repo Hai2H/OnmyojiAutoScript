@@ -460,7 +460,7 @@ function reviewQuery(filter) {
   if (filter === 'pending') query = 'status=pending,needs_label';
   else if (filter === 'unknown') query = 'status=unknown,needs_label';
   else query = 'status=correct,changed,unknown';
-  const rarity = $('#review-rarity-filter')?.value;
+  const rarity = $('#review-rarity-filters [data-rarity].active')?.dataset.rarity;
   if (rarity) query += `&rarity=${encodeURIComponent(rarity)}`;
   return `/api/events?${query}&limit=200`;
 }
@@ -1051,7 +1051,12 @@ $('#review-filters').addEventListener('click', (event) => {
   $$('#review-filters button').forEach((item) => item.classList.toggle('active', item === button));
   loadReviewQueue(true);
 });
-$('#review-rarity-filter').addEventListener('change', () => {
+$('#review-rarity-filters').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-rarity]');
+  if (!button) return;
+  $$('#review-rarity-filters [data-rarity]').forEach((item) => {
+    item.classList.toggle('active', item === button);
+  });
   loadReviewQueue(true);
 });
 $('#review-list').addEventListener('click', (event) => {

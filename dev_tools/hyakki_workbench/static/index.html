@@ -210,19 +210,19 @@
           <button data-filter="reviewed">已审核</button>
         </div>
       </div>
-      <div class="review-class-filter">
-        <label for="review-rarity-filter">稀有度</label>
-        <select id="review-rarity-filter" class="plain-select">
-          <option value="">全部等级</option>
-          <option value="UR">UR</option>
-          <option value="SP">SP</option>
-          <option value="SSR">SSR</option>
-          <option value="SR">SR</option>
-          <option value="R">R</option>
-          <option value="N">N</option>
-          <option value="G">G</option>
-          <option value="BUFF">BUFF</option>
-        </select>
+      <div class="review-rarity-filter">
+        <span class="field-label">稀有度</span>
+        <div class="segmented rarity-filter" id="review-rarity-filters" role="group" aria-label="按稀有度筛选">
+          <button class="active" data-rarity="">全部等级</button>
+          <button data-rarity="UR">UR</button>
+          <button data-rarity="SP">SP</button>
+          <button data-rarity="SSR">SSR</button>
+          <button data-rarity="SR">SR</button>
+          <button data-rarity="R">R</button>
+          <button data-rarity="N">N</button>
+          <button data-rarity="G">G</button>
+          <button data-rarity="BUFF">BUFF</button>
+        </div>
       </div>
       <div class="scan-shortcuts">
         <span><kbd>1</kbd> 旧模型正确</span>
