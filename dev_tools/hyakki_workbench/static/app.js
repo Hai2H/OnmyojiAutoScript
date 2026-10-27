@@ -2,7 +2,7 @@ const state = {
   summary: null,
   events: [],
   scanning: false,
-  reviewFilter: 'high',
+  reviewFilter: 'pending',
   reviewEvent: null,
   reviewImageIndex: 0,
   reviewItems: [],
@@ -457,8 +457,7 @@ async function loadScanPage() {
 
 function reviewQuery(filter) {
   let query = '';
-  if (filter === 'high') query = 'pending_high_only=true';
-  else if (filter === 'pending') query = 'status=pending,needs_label';
+  if (filter === 'pending') query = 'status=pending,needs_label';
   else if (filter === 'unknown') query = 'status=unknown,needs_label';
   else query = 'status=correct,changed,unknown';
   const rarity = $('#review-rarity-filter')?.value;
