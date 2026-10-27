@@ -29,6 +29,14 @@ from module.logger import logger
 from tasks.Hyakkiyakou.shikigami_table import SHIKIGAMI_TABLE
 
 
+def _json_default(value):
+    if hasattr(value, 'tolist'):
+        return value.tolist()
+    if hasattr(value, 'item'):
+        return value.item()
+    raise TypeError(f'Object of type {type(value).__name__} is not JSON serializable')
+
+
 class BeanCapture:
     schema_version = 1
 
@@ -83,7 +91,7 @@ class BeanCapture:
             'note': 'raw 是原图；prelabel 是旧模型建议，需在 X-AnyLabeling 里核对后导出 YOLO 标签。',
         }
         (self.folder/'round.json').write_text(
-            json.dumps(data, ensure_ascii=False, indent=1), encoding='utf-8')
+            json.dumps(data, ensure_ascii=False, indent=1, default=_json_default), encoding='utf-8')
 
     def _write_classes(self) -> None:
         """X-AnyLabeling 的类别清单，放在采集根目录，所有局共用。"""
@@ -132,7 +140,7 @@ class BeanCapture:
                        for t in tracks],
         }
         with (self.folder/'frames.jsonl').open('a', encoding='utf-8') as log:
-            log.write(json.dumps(record, ensure_ascii=False) + '\n')
+            log.write(json.dumps(record, ensure_ascii=False, default=_json_default) + '\n')
         if self.prelabel:
             self._write_prelabel(name, image.shape, tracks)
         self._write_round('capturing')
@@ -165,4 +173,4 @@ class BeanCapture:
             'imageWidth': width,
         }
         (self.folder/'prelabel'/f'{name}.json').write_text(
-            json.dumps(payload, ensure_ascii=False, indent=1), encoding='utf-8')
+            json.dumps(payload, ensure_ascii=False, indent=1, default=_json_default), encoding='utf-8')
